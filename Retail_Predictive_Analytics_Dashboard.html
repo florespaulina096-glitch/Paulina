@@ -111,6 +111,31 @@ details.note{background:var(--warn-soft); border-color:var(--warn);}
 .tip .bubble{display:none; position:absolute; z-index:60; bottom:130%; left:50%; transform:translateX(-50%); width:240px; background:var(--ink); color:var(--bg); font-size:11.5px; font-weight:500; line-height:1.4; padding:8px 10px; border-radius:8px; box-shadow:var(--shadow); text-transform:none; letter-spacing:0;}
 .tip:hover .bubble, .tip:focus .bubble{display:block;}
 
+/* Shared chart hover tooltip (positioned by JS in charts.js) — used by the
+   correlation scatter plots' nearest-point hover layer. */
+.chart-tooltip{position:fixed; z-index:80; pointer-events:none; background:var(--ink); color:var(--bg); border-radius:8px; padding:8px 10px; font-size:11.5px; line-height:1.45; box-shadow:var(--shadow); max-width:220px;}
+.chart-tooltip .ct-meta{font-weight:700; margin-bottom:3px; padding-bottom:3px; border-bottom:1px solid rgba(255,255,255,0.2); opacity:0.9;}
+.chart-tooltip .ct-row{display:flex; justify-content:space-between; gap:14px;}
+.chart-tooltip .ct-k{opacity:0.75;}
+.chart-tooltip .ct-v{font-weight:700; font-variant-numeric:tabular-nums;}
+
+/* Correlation scatter cards */
+.corr-card{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:12px;}
+.corr-card-head{display:flex; align-items:flex-start; justify-content:space-between; gap:10px;}
+.corr-card-head h4{font-size:12.5px; font-weight:700; color:var(--ink); text-transform:none; letter-spacing:0;}
+.corr-card-sub{font-size:10.5px; color:var(--sub); margin-top:1px;}
+.corr-stat{text-align:right; flex:none;}
+.corr-stat-val{font-size:18px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; line-height:1;}
+.corr-stat-lbl{font-size:9.5px; color:var(--sub); text-transform:uppercase; letter-spacing:.03em; margin-top:2px;}
+.corr-strength{display:inline-block; font-size:10.5px; font-weight:700; margin:6px 0 4px; padding:2px 8px; border-radius:999px;}
+.corr-strength.strong{background:var(--brand-soft); color:var(--brand-ink);}
+.corr-strength.moderate{background:var(--line); color:var(--ink); opacity:0.85;}
+.corr-strength.weak{background:transparent; color:var(--sub); padding-left:0;}
+.scatter-svg{width:100%; height:auto; display:block; cursor:crosshair;}
+.corr-controls{display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; margin-bottom:2px;}
+.corr-emph-legend{display:flex; gap:14px; font-size:11.5px; color:var(--sub); align-items:center;}
+.corr-emph-legend .sw{width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; vertical-align:-1px;}
+
 /* Tables */
 .table-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:10px;}
 table.data{width:100%; border-collapse:collapse; font-size:12.5px; min-width:520px;}
@@ -317,9 +342,11 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
     <div class="panel-body">
       <div class="chart-card"><h4>Correlation heatmap — key operating variables</h4><div id="corrHeatmap" style="max-width:640px;margin:0 auto;"></div></div>
       <hr class="sep">
-      <div class="control-row"><div class="control"><label>Colour scatter points by</label><select id="corrGroupDim">
-        <option value="Region">Region</option><option value="Category">Category</option><option value="Store_Format">Store format</option><option value="none">None</option>
-      </select></div></div>
+      <p class="tag-desc">Each point below is one store-category-week observation. Hover any point for its exact values; the dashed line is the fitted (OLS) trend. Points render in a single colour by default — use Highlight to spotlight one segment against the rest without adding competing hues.</p>
+      <div class="corr-controls">
+        <div class="control" style="min-width:220px;"><label>Highlight</label><select id="corrHighlight"></select></div>
+        <div class="corr-emph-legend" id="corrEmphLegend" hidden></div>
+      </div>
       <div class="grid cols-4" id="corrPairs"></div>
     </div>
   </section>
@@ -4119,38 +4146,135 @@ function barChart({width=640,height=280,data=[],colorFn,yTickFmt,horizontal=fals
 
 /* =====================================================================================
    SCATTER PLOT with OLS trendline — used throughout the Correlation section.
-   points: [{x,y,group}], groups colored by category if provided.
+   One hue by default (this is an "all-pairs" chart form: any two marks can sit side
+   by side, so a multi-color grouping either caps at 3 series or, better, uses the
+   emphasis pattern below). points: [{x,y,meta}]; pass `emphFn(point)->bool` to spotlight
+   a subset (e.g. one region) in the accent hue while the rest recede to neutral gray —
+   that is the "one series is the point, rest are context" job, not identity-by-hue.
+   Ships its own nearest-point hover layer (see mountScatterHover) so a reader can
+   inspect any point without having to land dead-center on an 8px dot.
    ===================================================================================== */
-function scatterChart({width=420,height=320,points=[],xLabel="",yLabel="",padLeft=54,padBottom=40}){
-  const W=width,H=height,padTop=14,padRight=14;
+let _scatterSeq = 0;
+function scatterChart({width=420,height=300,points=[],xLabel="",yLabel="",padLeft=56,padBottom=40,emphFn=null,xTipFmt,yTipFmt}){
+  const W=width,H=height,padTop=14,padRight=16;
+  const id = "sct"+(_scatterSeq++);
   const xs=points.map(p=>p.x), ys=points.map(p=>p.y);
-  const {ticks:xt,min:xMin,max:xMax}=niceTicks(Math.min(...xs),Math.max(...xs),5);
+  // Fewer x ticks than y: these cards run ~300px wide, so a 5-tick x-axis on a
+  // wide-range variable (e.g. Labour Hours) crowds and clips at the edge.
+  const {ticks:xt,min:xMin,max:xMax}=niceTicks(Math.min(...xs),Math.max(...xs),4);
   const {ticks:yt,min:yMin,max:yMax}=niceTicks(Math.min(...ys),Math.max(...ys),5);
   const x=scaleLinear([xMin,xMax],[padLeft,W-padRight]);
   const y=scaleLinear([yMin,yMax],[H-padBottom,padTop]);
-  const groups = Array.from(new Set(points.map(p=>p.group||"All")));
-  const colorOf = g => COLORS[groups.indexOf(g)%COLORS.length];
   // Small-scale variables (rates stored as fractions, e.g. 0.08) need decimals or every
   // tick collapses to "0" — pick decimal places from the axis span, not a fixed value.
+  // Axis ticks stay plain numbers (no $/%/unit suffix) so they never crowd or clip;
+  // the fuller, unit-labeled value lives in the hover tooltip via xTipFmt/yTipFmt.
   const decimalsFor = span => span===0?0 : span<1?2 : span<10?1 : 0;
   const xDec = decimalsFor(xMax-xMin), yDec = decimalsFor(yMax-yMin);
-  let out = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
-  yt.forEach(t=> out += `<line class="gridline" x1="${padLeft}" x2="${W-padRight}" y1="${y(t)}" y2="${y(t)}"/><text class="axis" x="${padLeft-8}" y="${y(t)+3}" text-anchor="end" font-size="9.5">${fmtNum(t,yDec)}</text>`);
-  xt.forEach(t=> out += `<text class="axis" x="${x(t)}" y="${H-padBottom+16}" text-anchor="middle" font-size="9.5">${fmtNum(t,xDec)}</text>`);
+  const xAxisFmt = v=>fmtNum(v,xDec), yAxisFmt = v=>fmtNum(v,yDec);
+  const xf = xTipFmt || xAxisFmt, yf = yTipFmt || yAxisFmt;
+
+  let out = `<svg viewBox="0 0 ${W} ${H}" role="img" id="${id}" data-w="${W}" data-h="${H}" class="scatter-svg">`;
+  // Gridlines are solid hairlines, one step off the surface — dashing a grid reads as
+  // a threshold/projection, which is not what it means here. The tick nearest zero
+  // (if the domain crosses it, e.g. Operating Profit) gets the slightly stronger
+  // "baseline" stroke so loss-vs-profit still separates at a glance.
+  yt.forEach(t=>{
+    const isBaseline = Math.abs(t)<1e-9 && yMin<0 && yMax>0;
+    out += `<line x1="${padLeft}" x2="${W-padRight}" y1="${y(t)}" y2="${y(t)}" stroke="${isBaseline?'var(--sub)':'var(--line)'}" stroke-width="1"/>`;
+    out += `<text class="axis" x="${padLeft-8}" y="${y(t)+3}" text-anchor="end" font-size="9.5">${yAxisFmt(t)}</text>`;
+  });
+  xt.forEach(t=> out += `<text class="axis" x="${x(t)}" y="${H-padBottom+16}" text-anchor="middle" font-size="9.5">${xAxisFmt(t)}</text>`);
   out += `<line class="axis" x1="${padLeft}" x2="${W-padRight}" y1="${H-padBottom}" y2="${H-padBottom}"/>`;
   out += `<line class="axis" x1="${padLeft}" x2="${padLeft}" y1="${padTop}" y2="${H-padBottom}"/>`;
-  points.forEach(p=>{
-    out += `<circle cx="${x(p.x)}" cy="${y(p.y)}" r="3" fill="${colorOf(p.group||'All')}" opacity="0.55"><title>${esc(p.group||'')} x=${fmtNum(p.x)} y=${fmtNum(p.y)}</title></circle>`;
-  });
-  // OLS trendline y = a + b x
+
+  // OLS trendline y = a + b x — drawn first so the marks sit on top of it.
   const n=xs.length, mx=xs.reduce((s,v)=>s+v,0)/n, my=ys.reduce((s,v)=>s+v,0)/n;
   let sxy=0,sxx=0; for(let i=0;i<n;i++){ sxy+=(xs[i]-mx)*(ys[i]-my); sxx+=(xs[i]-mx)*(xs[i]-mx); }
   const b = sxx? sxy/sxx : 0, a = my-b*mx;
-  const y1=a+b*xMin, y2=a+b*xMax;
-  out += `<line x1="${x(xMin)}" x2="${x(xMax)}" y1="${y(y1)}" y2="${y(y2)}" stroke="var(--ink)" stroke-width="1.6" stroke-dasharray="5,4" opacity="0.7"/>`;
+  const ty1=a+b*xMin, ty2=a+b*xMax;
+  out += `<line x1="${x(xMin)}" x2="${x(xMax)}" y1="${y(ty1)}" y2="${y(ty2)}" stroke="var(--sub)" stroke-width="2" stroke-dasharray="5,4" stroke-linecap="round"/>`;
+
+  // Marks: >=8px dots (r=4), a 2px surface-color ring so overlapping points stay
+  // legible, single accent hue — or accent-vs-neutral when an emphasis is active.
+  const px = new Array(n), py = new Array(n);
+  points.forEach((p,i)=>{
+    px[i]=x(p.x); py[i]=y(p.y);
+    const emph = emphFn ? emphFn(p) : true;
+    const fill = emph ? "var(--brand)" : "var(--sub)";
+    const op = emph ? 0.62 : 0.22;
+    const r = emph ? 4 : 3;
+    out += `<circle class="sct-dot" cx="${px[i]}" cy="${py[i]}" r="${r}" fill="${fill}" opacity="${op}" stroke="var(--panel)" stroke-width="1.25"/>`;
+  });
+  // Hover layer: one reusable highlight ring + crosshair pair, moved by mountScatterHover.
+  out += `<g data-role="hoverlayer" opacity="0" pointer-events="none">
+    <line data-role="hx" x1="0" x2="0" y1="${padTop}" y2="${H-padBottom}" stroke="var(--ink)" stroke-width="1" stroke-dasharray="2,3" opacity="0.35"/>
+    <line data-role="hy" x1="${padLeft}" x2="${W-padRight}" y1="0" y2="0" stroke="var(--ink)" stroke-width="1" stroke-dasharray="2,3" opacity="0.35"/>
+    <circle data-role="hdot" r="6.5" fill="var(--brand)" stroke="var(--panel)" stroke-width="2"/>
+  </g>`;
+  out += `<rect data-role="capture" x="${padLeft}" y="${padTop}" width="${W-padLeft-padRight}" height="${H-padTop-padBottom}" fill="transparent"/>`;
   out += `<text class="axis" x="${W/2}" y="${H-4}" text-anchor="middle" font-size="10.5" font-weight="700">${esc(xLabel)}</text>`;
   out += `</svg>`;
-  return out;
+
+  return { html: out, id, r: {value: b>=0?"positive":"negative"},
+    mount(container, meta){ mountScatterHover(container.querySelector("#"+id), points, px, py, meta, xf, yf, xLabel, yLabel); } };
+}
+
+/* Nearest-point hover: ONE listener per chart (not one per dot — cheap even at a
+   few thousand points), converts the pointer to viewBox space, finds the closest
+   data point by squared distance, and moves a single shared tooltip + crosshair to
+   it. This is the scatter-specific version of the "hit target bigger than the mark"
+   rule: the whole plot area is the target, not each 8px circle. */
+function ensureTooltip(){
+  let el = document.getElementById("chart-tooltip");
+  if(!el){
+    el = document.createElement("div");
+    el.id = "chart-tooltip";
+    el.className = "chart-tooltip";
+    el.setAttribute("role","status");
+    el.hidden = true;
+    document.body.appendChild(el);
+  }
+  return el;
+}
+function mountScatterHover(svg, points, px, py, meta, xf, yf, xLabel, yLabel){
+  if(!svg) return;
+  const W = +svg.dataset.w, H = +svg.dataset.h;
+  const layer = svg.querySelector('[data-role="hoverlayer"]');
+  const hx = svg.querySelector('[data-role="hx"]');
+  const hy = svg.querySelector('[data-role="hy"]');
+  const hdot = svg.querySelector('[data-role="hdot"]');
+  const capture = svg.querySelector('[data-role="capture"]');
+  const tip = ensureTooltip();
+  function nearest(vx,vy){
+    let bi=-1, bd=Infinity;
+    for(let i=0;i<px.length;i++){ const dx=px[i]-vx, dy=py[i]-vy, d=dx*dx+dy*dy; if(d<bd){bd=d; bi=i;} }
+    return bi;
+  }
+  function move(evt){
+    const rect = svg.getBoundingClientRect();
+    if(rect.width===0) return;
+    const vx = (evt.clientX-rect.left) * (W/rect.width);
+    const vy = (evt.clientY-rect.top) * (H/rect.height);
+    const i = nearest(vx,vy);
+    if(i<0) return;
+    layer.setAttribute("opacity","1");
+    hx.setAttribute("x1", px[i]); hx.setAttribute("x2", px[i]);
+    hy.setAttribute("y1", py[i]); hy.setAttribute("y2", py[i]);
+    hdot.setAttribute("cx", px[i]); hdot.setAttribute("cy", py[i]);
+    const p = points[i];
+    const label = meta ? meta(p) : "";
+    tip.innerHTML = `${label?`<div class="ct-meta">${esc(label)}</div>`:""}<div class="ct-row"><span class="ct-k">${esc(xLabel)}</span><span class="ct-v">${esc(xf(p.x))}</span></div><div class="ct-row"><span class="ct-k">${esc(yLabel)}</span><span class="ct-v">${esc(yf(p.y))}</span></div>`;
+    tip.hidden = false;
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let left = evt.clientX+14, top = evt.clientY-th-14;
+    if(left+tw>window.innerWidth-8) left = evt.clientX-tw-14;
+    if(top<8) top = evt.clientY+14;
+    tip.style.left = left+"px"; tip.style.top = top+"px";
+  }
+  function leave(){ layer.setAttribute("opacity","0"); tip.hidden = true; }
+  capture.addEventListener("pointermove", move);
+  capture.addEventListener("pointerleave", leave);
 }
 
 /* =====================================================================================
@@ -4227,7 +4351,7 @@ function probBar({pct, width=220, height=14, good=true}){
   return `<svg viewBox="0 0 ${width} ${height}" style="width:100%;height:${height}px;"><rect x="0" y="0" width="${width}" height="${height}" rx="${height/2}" fill="var(--line)"/><rect x="0" y="0" width="${width*w/100}" height="${height}" rx="${height/2}" fill="${col}"/></svg>`;
 }
 
-GLOBAL.Charts = { lineChart, barChart, scatterChart, heatmap, histogram, sparkline, probBar, fmtNum, fmtCAD, fmtPct, COLORS, esc };
+GLOBAL.Charts = { lineChart, barChart, scatterChart, heatmap, histogram, sparkline, probBar, ensureTooltip, fmtNum, fmtCAD, fmtPct, COLORS, esc };
 })(window);
 
 </script>
@@ -4604,6 +4728,9 @@ function populateFilterOptions(){
   $("#descMetric").innerHTML = METRICS.map(m=>opt(m[0],m[1])).join("");
   $("#descMetric").value = "Sales_Revenue";
 
+  const optGroup = (label, dim) => `<optgroup label="${label}">${uniq(dim).map(v=>opt(dim+":"+v, v)).join("")}</optgroup>`;
+  $("#corrHighlight").innerHTML = opt("","All stores (no highlight)") + optGroup("Region","Region") + optGroup("Category","Category") + optGroup("Store format","Store_Format");
+
   $("#heroBadges").innerHTML = [
     "3,328 weekly observations","8 stores · 5 regions","4 product categories","104 weeks (2024–2025)","100% client-side computation"
   ].map(t=>`<span class="badge">${t}</span>`).join("");
@@ -4634,7 +4761,7 @@ function bindFilterEvents(){
   $("#descMetric").addEventListener("change", renderDescriptive);
   $("#descDim").addEventListener("change", renderDescriptive);
   $("#varDim").addEventListener("change", renderVariance);
-  $("#corrGroupDim").addEventListener("change", renderCorrelation);
+  $("#corrHighlight").addEventListener("change", renderCorrelation);
   $("#fcSeries").addEventListener("change", renderForecast);
   $("#rangeLo").addEventListener("input", renderRangeProb);
   $("#rangeHi").addEventListener("input", renderRangeProb);
@@ -4878,21 +5005,57 @@ function renderRangeProb(){
 /* ---------------------------------------------------------------------------------
    6. CORRELATION
 --------------------------------------------------------------------------------- */
+const CORR_FMT = {
+  Sales_Revenue:v=>C.fmtCAD(v), Total_Expense:v=>C.fmtCAD(v), Marketing_Spend:v=>C.fmtCAD(v),
+  Labor_Expense:v=>C.fmtCAD(v), Operating_Profit:v=>C.fmtCAD(v),
+  Conversion_Rate:v=>(v*100).toFixed(1)+"%", Discount_Rate:v=>(v*100).toFixed(1)+"%",
+  Inventory_Availability:v=>(v*100).toFixed(1)+"%", COGS_Rate:v=>(v*100).toFixed(1)+"%",
+  Foot_Traffic:v=>C.fmtNum(v,0)+" visits", Labor_Hours:v=>C.fmtNum(v,0)+" hrs"
+};
 function renderCorrelation(){
   const rows = STATE.FILTERED;
   const M = A.correlationMatrix(rows, A.HEATMAP_VARS);
   const shortLabels = A.HEATMAP_VARS.map(v=>v.replace(/_/g," ").replace("Rate","Rt").replace("Availability","Avail").replace("Confidence Index","Conf.Idx").replace("Competitor Price Index","Comp.Price"));
   $("#corrHeatmap").innerHTML = C.heatmap({labels:shortLabels, matrix:M});
 
-  const groupDim = $("#corrGroupDim").value;
-  $("#corrPairs").innerHTML = A.CORE_PAIRS.map(([xk,yk,xl,yl])=>{
-    const r = Stat.pearson(rows.map(r=>r[xk]), rows.map(r=>r[yk]));
-    const points = rows.map(row=>({x:row[xk], y:row[yk], group: groupDim!=="none"? row[groupDim] : undefined}));
+  const highlightVal = $("#corrHighlight").value; // "" or "Dimension:Value"
+  const [hDim, hVal] = highlightVal ? highlightVal.split(":") : [null,null];
+  const emphFn = hDim ? (p => p.row[hDim]===hVal) : null;
+  $("#corrEmphLegend").hidden = !hDim;
+  if(hDim){
+    $("#corrEmphLegend").innerHTML =
+      `<span><span class="sw" style="background:var(--brand)"></span>${hVal}</span>`+
+      `<span><span class="sw" style="background:var(--sub);opacity:.5"></span>All other stores</span>`;
+  }
+
+  const cardsHtml = [];
+  const mounts = [];
+  A.CORE_PAIRS.forEach(([xk,yk,xl,yl])=>{
+    const r = Stat.pearson(rows.map(row=>row[xk]), rows.map(row=>row[yk]));
+    const points = rows.map(row=>({x:row[xk], y:row[yk], row}));
     const strength = Math.abs(r)>=0.6?"strong":Math.abs(r)>=0.3?"moderate":"weak";
-    const dir = r>=0?"positive":"negative";
-    return `<div class="chart-card"><h4>${xl} vs ${yl}</h4>${C.scatterChart({points, xLabel:xl, yLabel:yl, width:300, height:230})}
-      <p class="small" style="margin-top:4px;"><b>r = ${r.toFixed(2)}</b> — a ${strength} ${dir} relationship.</p></div>`;
-  }).join("");
+    const strengthLabel = (Math.abs(r)>=0.6?"Strong":Math.abs(r)>=0.3?"Moderate":"Weak") + " " + (r>=0?"positive":"negative");
+    const chart = C.scatterChart({
+      points, xLabel:xl, yLabel:yl, width:300, height:220,
+      emphFn, xTipFmt: CORR_FMT[xk]||(v=>C.fmtNum(v,1)), yTipFmt: CORR_FMT[yk]||(v=>C.fmtNum(v,1))
+    });
+    cardsHtml.push(`<div class="corr-card">
+      <div class="corr-card-head">
+        <div><h4>${xl} vs. ${yl}</h4><div class="corr-card-sub">${rows.length.toLocaleString()} weekly observations</div></div>
+        <div class="corr-stat"><div class="corr-stat-val">${r.toFixed(2)}</div><div class="corr-stat-lbl">Pearson r</div></div>
+      </div>
+      <span class="corr-strength ${strength}">${strengthLabel}</span>
+      <div class="corr-chart-wrap">${chart.html}</div>
+    </div>`);
+    mounts.push({chart, points});
+  });
+  $("#corrPairs").innerHTML = cardsHtml.join("");
+  // Mount hover interactivity after the HTML is in the DOM (each chart needs its
+  // rendered <svg> to exist before we can attach the nearest-point listener).
+  const cards = $("#corrPairs").children;
+  mounts.forEach((m,i)=>{
+    m.chart.mount(cards[i], p => `${p.row.Store_ID} · ${p.row.City} · ${p.row.Category} · ${p.row.Week_Start}`);
+  });
 }
 
 /* ---------------------------------------------------------------------------------

@@ -136,6 +136,27 @@ details.note{background:var(--warn-soft); border-color:var(--warn);}
 .corr-emph-legend{display:flex; gap:14px; font-size:11.5px; color:var(--sub); align-items:center;}
 .corr-emph-legend .sw{width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; vertical-align:-1px;}
 
+/* Correlation heatmap */
+.heatmap-svg{width:100%; height:auto; display:block;}
+.heatmap-svg .heat-cell{cursor:pointer; outline:none; transition:filter .1s;}
+.heatmap-svg .heat-cell:hover, .heatmap-svg .heat-cell:focus{filter:brightness(1.1);}
+.heatmap-scale{display:flex; align-items:center; gap:8px; justify-content:center; margin-top:10px; font-size:10.5px; color:var(--sub);}
+.heatmap-scale .bar{width:180px; height:10px; border-radius:5px; background:linear-gradient(to right, var(--bad), var(--line) 50%, var(--brand));}
+.heatmap-legend-row{display:flex; flex-wrap:wrap; gap:16px; justify-content:center; margin-top:8px; font-size:11px; color:var(--sub);}
+.heatmap-legend-row .sw{width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:5px; vertical-align:-1px;}
+.heatmap-legend-row .ring{display:inline-block; width:10px; height:10px; border:1.5px solid var(--ink); border-radius:2px; margin-right:5px; vertical-align:-1.5px;}
+
+/* Strongest-relationships list + managerial interpretation */
+.corr-rank-list{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px;}
+.corr-rank-item{display:flex; align-items:flex-start; gap:10px; padding:8px 10px; background:var(--bg); border:1px solid var(--line); border-radius:8px;}
+.corr-rank-num{flex:none; width:20px; height:20px; border-radius:50%; background:var(--brand-soft); color:var(--brand-ink); font-size:10.5px; font-weight:800; display:flex; align-items:center; justify-content:center;}
+.corr-rank-body{flex:1; min-width:0;}
+.corr-rank-pair{font-size:12.5px; font-weight:700; color:var(--ink);}
+.corr-rank-meta{font-size:11px; color:var(--sub); margin-top:1px;}
+.corr-rank-r{flex:none; font-family:var(--mono); font-weight:800; font-size:13px; color:var(--ink);}
+.corr-interp p{font-size:12.5px; color:var(--ink); line-height:1.6;}
+.corr-interp p.small{color:var(--sub);}
+
 /* Tables */
 .table-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:10px;}
 table.data{width:100%; border-collapse:collapse; font-size:12.5px; min-width:520px;}
@@ -340,7 +361,23 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
   <section class="panel" id="correlation">
     <div class="panel-head"><h2>6 · Correlation &amp; Relationships</h2><span class="step-tag">Diagnostic · Why it happened</span></div>
     <div class="panel-body">
-      <div class="chart-card"><h4>Correlation heatmap — key operating variables</h4><div id="corrHeatmap" style="max-width:640px;margin:0 auto;"></div></div>
+      <p class="tag-desc">Variables are grouped by business role (Sales Drivers, Expense Drivers, Market Context, Outcomes) so you can scan one quadrant at a time. Every cell shows its Pearson r; cells outlined in bold mark a strong relationship (|r| ≥ 0.6). Hover or focus any cell for details.</p>
+      <div class="two-col">
+        <div class="chart-card">
+          <h4>Correlation heatmap — key operating variables</h4>
+          <div style="max-width:640px;margin:0 auto;"><div id="corrHeatmap"></div>
+          <div class="heatmap-scale"><span>&minus;1.0</span><span class="bar"></span><span>+1.0</span></div>
+          <div class="heatmap-legend-row" id="corrHeatmapLegend"></div></div>
+        </div>
+        <div class="chart-card">
+          <h4>Strongest relationships in the current selection</h4>
+          <ol class="corr-rank-list" id="corrTopPairs"></ol>
+        </div>
+      </div>
+      <div class="chart-card corr-interp" style="margin-top:14px;">
+        <h4>Managerial interpretation <span class="tip">?<span class="bubble">Auto-generated from the correlation matrix above — recomputes with every filter change. Correlation describes association, not causation; see §7 for regression coefficients that hold other drivers constant.</span></span></h4>
+        <div id="corrInterpretation"></div>
+      </div>
       <hr class="sep">
       <p class="tag-desc">Each point below is one store-category-week observation. Hover any point for its exact values; the dashed line is the fitted (OLS) trend. Points render in a single colour by default — use Highlight to spotlight one segment against the rest without adding competing hues.</p>
       <div class="corr-controls">
@@ -4278,33 +4315,122 @@ function mountScatterHover(svg, points, px, py, meta, xf, yf, xLabel, yLabel){
 }
 
 /* =====================================================================================
-   CORRELATION HEATMAP — diverging red-blue scale centered at 0.
+   CORRELATION HEATMAP
+   - Rows/columns are banded by business group (Sales Drivers / Expense Drivers /
+     Market Context / Outcomes) so a reader can scan one quadrant at a time instead
+     of hunting through a flat, unordered variable list.
+   - Diverging red<->blue scale, poles matched to this dashboard's own --bad/--brand
+     tokens per theme (passed in as `dark`), with a true neutral-gray midpoint (not
+     white) so "no relationship" doesn't read as "blank/missing".
+   - Every cell always carries its numeric r value — legibility no longer depends on
+     how many variables happen to be in the matrix.
+   - Off-diagonal cells with |r| at/above `strongThreshold` get an inner highlight
+     ring; the trivial diagonal (self-correlation, r=1 by definition) is rendered in
+     a neutral gray rather than the scale's "strongest" blue, so it never gets
+     mistaken for a genuine finding.
+   - Ships a per-cell hover/focus tooltip via mount() — cells are a small, fixed
+     grid, so (unlike the scatter plots) a direct listener per cell is cheap and
+     lets each one "lift" independently on hover.
    ===================================================================================== */
-function heatmap({labels=[], matrix=[], size=460}){
-  const n=labels.length;
-  const cell = Math.floor((size-120)/n);
-  const W = 120+cell*n, H=120+cell*n;
-  function color(v){
-    // diverging: -1 -> red, 0 -> near-white/panel, +1 -> blue
-    const t = (v+1)/2; // 0..1
-    const neg=[194,43,58], mid=[245,247,250], pos=[30,95,217];
-    let c;
-    if(t<0.5){ const f=t/0.5; c=neg.map((cv,i)=>Math.round(cv+(mid[i]-cv)*f)); }
-    else{ const f=(t-0.5)/0.5; c=mid.map((cv,i)=>Math.round(cv+(pos[i]-cv)*f)); }
-    return `rgb(${c[0]},${c[1]},${c[2]})`;
-  }
-  let out = `<svg viewBox="0 0 ${W} ${H}" role="img" font-family="inherit">`;
-  labels.forEach((lab,i)=>{
-    out += `<text x="${115}" y="${125+i*cell+cell/2+3}" text-anchor="end" font-size="10" class="axis">${esc(lab)}</text>`;
-    out += `<text x="${120+i*cell+cell/2}" y="112" text-anchor="middle" font-size="10" class="axis" transform="rotate(-40 ${120+i*cell+cell/2} 112)">${esc(lab)}</text>`;
+function heatmap({keys=[], labels=[], groups=[], matrix=[], dark=false, groupOf={}, strongThreshold=0.6, cellSize=36, gap=10}){
+  const id = "hm"+(_scatterSeq++);
+  const n = keys.length;
+  let cum = 0; const starts = []; const groupRanges = [];
+  groups.forEach(g=>{
+    const gStart = cum;
+    g.vars.forEach(()=>{ starts.push(cum); cum += cellSize; });
+    groupRanges.push({name:g.name, start:gStart, end:cum});
+    cum += gap;
   });
+  const total = cum - gap;
+
+  const leftLabel = 154, topLabel = 118, bandThick = 8, bandGap = 5, pad = 12;
+  const gridX0 = leftLabel + bandThick + bandGap;
+  const gridY0 = topLabel + bandThick + bandGap;
+  const W = gridX0 + total + pad, H = gridY0 + total + pad;
+
+  // Poles matched to this dashboard's --bad / --brand tokens (light & dark values);
+  // midpoint is a true neutral gray (not the panel color) so zero reads as "nothing".
+  const poles = dark
+    ? { neg:[255,107,122], pos:[91,141,239], mid:[56,56,53] }
+    : { neg:[194,43,58],   pos:[30,95,217],  mid:[240,239,236] };
+  const diagFill = dark ? [44,44,42] : [225,224,217];
+  const groupColors = ["var(--accent2)","var(--accent4)","var(--accent6)","var(--accent3)"];
+  function cellColor(v){
+    const t=(v+1)/2;
+    return t<0.5
+      ? poles.neg.map((cv,i)=>Math.round(cv+(poles.mid[i]-cv)*(t/0.5)))
+      : poles.mid.map((cv,i)=>Math.round(cv+(poles.pos[i]-cv)*((t-0.5)/0.5)));
+  }
+  const luminance = ([r,g,b]) => 0.2126*r+0.7152*g+0.0722*b;
+
+  let out = `<svg viewBox="0 0 ${W} ${H}" role="img" id="${id}" data-w="${W}" data-h="${H}" class="heatmap-svg">`;
+
+  // Group bands — a categorical "which group" channel, deliberately separate hues
+  // from the red/blue correlation scale so the two encodings never get confused.
+  groupRanges.forEach((gr,gi)=>{
+    const col = groupColors[gi%groupColors.length];
+    const mid = gridX0+gr.start+(gr.end-gr.start)/2;
+    out += `<rect x="${gridX0+gr.start}" y="${topLabel}" width="${gr.end-gr.start-gap}" height="${bandThick}" fill="${col}" rx="2"/>`;
+    out += `<rect x="${leftLabel}" y="${gridY0+gr.start}" width="${bandThick}" height="${gr.end-gr.start-gap}" fill="${col}" rx="2"/>`;
+    out += `<text x="${mid}" y="${topLabel-3}" text-anchor="middle" font-size="9.5" font-weight="700" fill="${col}">${esc(gr.name)}</text>`;
+  });
+
+  // Column + row labels
+  keys.forEach((k,i)=>{
+    const cx = gridX0+starts[i]+cellSize/2, cy = gridY0+starts[i]+cellSize/2;
+    out += `<text x="${leftLabel-bandThick-bandGap-6}" y="${cy+3.5}" text-anchor="end" font-size="10.5" class="axis">${esc(labels[i])}</text>`;
+    out += `<text x="${cx+4}" y="${topLabel-bandThick-bandGap-4}" text-anchor="start" font-size="10.5" class="axis" transform="rotate(-42 ${cx+4} ${topLabel-bandThick-bandGap-4})">${esc(labels[i])}</text>`;
+  });
+
+  // Cells
   for(let i=0;i<n;i++) for(let j=0;j<n;j++){
     const v = matrix[i][j];
-    out += `<rect x="${120+j*cell}" y="${120+i*cell}" width="${cell}" height="${cell}" fill="${color(v)}" stroke="var(--panel)" stroke-width="1"><title>${esc(labels[i])} vs ${esc(labels[j])}: r=${v.toFixed(2)}</title></rect>`;
-    if(cell>34) out += `<text x="${120+j*cell+cell/2}" y="${120+i*cell+cell/2+3}" text-anchor="middle" font-size="9.5" fill="${Math.abs(v)>0.55?'#fff':'#222'}">${v.toFixed(2)}</text>`;
+    const x = gridX0+starts[j], y = gridY0+starts[i];
+    const isDiag = i===j;
+    const rgb = isDiag ? diagFill : cellColor(v);
+    const textColor = luminance(rgb)<140 ? "#ffffff" : "#161616";
+    const strong = !isDiag && Math.abs(v)>=strongThreshold;
+    out += `<rect class="heat-cell" data-i="${i}" data-j="${j}" x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" fill="rgb(${rgb[0]},${rgb[1]},${rgb[2]})" stroke="var(--panel)" stroke-width="1.5" tabindex="0"/>`;
+    if(strong) out += `<rect x="${x+2.25}" y="${y+2.25}" width="${cellSize-4.5}" height="${cellSize-4.5}" fill="none" stroke="${textColor}" stroke-width="1.5" rx="2" opacity="0.9" pointer-events="none"/>`;
+    out += `<text x="${x+cellSize/2}" y="${y+cellSize/2+3.5}" text-anchor="middle" font-size="10.5" font-weight="${strong?800:500}" fill="${textColor}" pointer-events="none">${isDiag?"1.00":v.toFixed(2)}</text>`;
   }
   out += `</svg>`;
-  return out;
+
+  return { html: out, id,
+    mount(container){ mountHeatmapHover(container.querySelector("#"+id), keys, labels, matrix, groupOf, strongThreshold); } };
+}
+
+function mountHeatmapHover(svg, keys, labels, matrix, groupOf, strongThreshold){
+  if(!svg) return;
+  const tip = ensureTooltip();
+  svg.querySelectorAll(".heat-cell").forEach(cell=>{
+    const i = +cell.dataset.i, j = +cell.dataset.j;
+    function show(){
+      const v = matrix[i][j], isDiag = i===j;
+      let html = `<div class="ct-meta">${esc(labels[i])} × ${esc(labels[j])}</div>`;
+      if(isDiag){
+        html += `<div class="ct-row"><span class="ct-k">Self-correlation</span><span class="ct-v">r = 1.00</span></div>`;
+      } else {
+        const strength = Math.abs(v)>=strongThreshold?"Strong":Math.abs(v)>=0.3?"Moderate":"Weak";
+        html += `<div class="ct-row"><span class="ct-k">Pearson r</span><span class="ct-v">${v.toFixed(2)}</span></div>`+
+                `<div class="ct-row"><span class="ct-k">Relationship</span><span class="ct-v">${strength} ${v>=0?"positive":"negative"}</span></div>`;
+        if(groupOf[keys[i]]==="Outcomes" && groupOf[keys[j]]==="Outcomes"){
+          html += `<div class="ct-meta" style="margin-top:4px;padding-top:4px;border-top:1px solid rgba(255,255,255,.2);border-bottom:none;font-weight:500;">Both are financial outcomes — part of this link is accounting math (see §7).</div>`;
+        }
+      }
+      tip.innerHTML = html; tip.hidden = false;
+      const r = cell.getBoundingClientRect();
+      let left = r.left+r.width/2-tip.offsetWidth/2, top = r.top-tip.offsetHeight-10;
+      if(top<8) top = r.bottom+10;
+      tip.style.left = Math.max(8,left)+"px"; tip.style.top = top+"px";
+    }
+    function hide(){ tip.hidden = true; }
+    cell.addEventListener("pointerenter", show);
+    cell.addEventListener("focus", show);
+    cell.addEventListener("pointerleave", hide);
+    cell.addEventListener("blur", hide);
+  });
 }
 
 /* =====================================================================================
@@ -4479,9 +4605,22 @@ const CORE_PAIRS = [
   ["Labor_Hours","Labor_Expense","Labour hours","Labour expense"],
   ["COGS_Rate","Operating_Profit","COGS rate","Operating profit"]
 ];
-const HEATMAP_VARS = ["Foot_Traffic","Conversion_Rate","Marketing_Spend","Discount_Rate","Inventory_Availability",
-  "Avg_Transaction_Value","Consumer_Confidence_Index","Competitor_Price_Index","Labor_Hours","COGS_Rate",
-  "Return_Rate","Sales_Revenue","Total_Expense","Operating_Profit"];
+/* Variables grouped by business meaning rather than a flat alphabetical/technical
+   list — this is what lets the heatmap band rows/columns into "Sales Drivers",
+   "Expense Drivers", "Market Context" and "Outcomes" so a reader can scan one
+   quadrant at a time instead of hunting through 14 unrelated labels. Outcomes are
+   kept last and flagged separately downstream because pairs *within* that group
+   (Sales Revenue, Total Expense, Operating Profit) are partly accounting
+   identities, not independent behavioural relationships — see §7's variable
+   selection notes for the exact formulas. */
+const HEATMAP_GROUPS = [
+  { name:"Sales Drivers", vars:["Foot_Traffic","Conversion_Rate","Avg_Transaction_Value","Marketing_Spend","Discount_Rate","Inventory_Availability"] },
+  { name:"Expense Drivers", vars:["Labor_Hours","COGS_Rate","Return_Rate"] },
+  { name:"Market Context", vars:["Consumer_Confidence_Index","Competitor_Price_Index"] },
+  { name:"Outcomes", vars:["Sales_Revenue","Total_Expense","Operating_Profit"] }
+];
+const HEATMAP_VARS = HEATMAP_GROUPS.flatMap(g=>g.vars);
+const HEATMAP_GROUP_OF = Object.fromEntries(HEATMAP_GROUPS.flatMap(g=>g.vars.map(v=>[v,g.name])));
 
 function correlationMatrix(rows, vars){
   const cols = vars.map(v=>rows.map(r=>r[v]));
@@ -4492,6 +4631,17 @@ function correlationMatrix(rows, vars){
     M[i][j]=r; M[j][i]=r;
   }
   return M;
+}
+
+/* Ranks every unique off-diagonal cell by |r| — feeds the "Strongest relationships"
+   callout and the managerial-interpretation narrative below the heatmap. */
+function topCorrPairs(matrix, keys, n){
+  const out = [];
+  for(let i=0;i<keys.length;i++) for(let j=i+1;j<keys.length;j++){
+    out.push({ i, j, keyI:keys[i], keyJ:keys[j], r:matrix[i][j] });
+  }
+  out.sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+  return n? out.slice(0,n) : out;
 }
 
 /* ---------------------------------------------------------------------------------
@@ -4636,7 +4786,7 @@ function probWithinRange(mean, sd, lo, hi){
 GLOBAL.Analytics = {
   groupBy, varianceRow, varianceSummary, varianceByGroup,
   segmentStores, segmentCategories, segmentCost, segmentPromotionSensitivity,
-  CORE_PAIRS, HEATMAP_VARS, correlationMatrix,
+  CORE_PAIRS, HEATMAP_VARS, HEATMAP_GROUPS, HEATMAP_GROUP_OF, correlationMatrix, topCorrPairs,
   MODEL1_X, MODEL2_X, trainModel1, trainModel2, timeSplit, validateModel,
   weeklyAggregate, fitTrendSeasonal, forecast12,
   probMeetSalesBudgetHistorical, probExpenseOverrunHistorical, probPositiveProfitHistorical,
@@ -5012,11 +5162,37 @@ const CORR_FMT = {
   Inventory_Availability:v=>(v*100).toFixed(1)+"%", COGS_Rate:v=>(v*100).toFixed(1)+"%",
   Foot_Traffic:v=>C.fmtNum(v,0)+" visits", Labor_Hours:v=>C.fmtNum(v,0)+" hrs"
 };
+const HEATMAP_LABELS = {
+  Foot_Traffic:"Foot Traffic", Conversion_Rate:"Conversion Rate", Avg_Transaction_Value:"Avg Transaction Value",
+  Marketing_Spend:"Marketing Spend", Discount_Rate:"Discount Rate", Inventory_Availability:"Inventory Availability",
+  Labor_Hours:"Labour Hours", COGS_Rate:"COGS Rate", Return_Rate:"Return Rate",
+  Consumer_Confidence_Index:"Consumer Confidence", Competitor_Price_Index:"Competitor Price Index",
+  Sales_Revenue:"Sales Revenue", Total_Expense:"Total Expense", Operating_Profit:"Operating Profit"
+};
+const HEATMAP_GROUP_COLORS = ["var(--accent2)","var(--accent4)","var(--accent6)","var(--accent3)"];
+const STRONG_R = 0.6;
+function isDarkTheme(){
+  const attr = document.documentElement.getAttribute("data-theme");
+  if(attr==="dark") return true;
+  if(attr==="light") return false;
+  return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+}
 function renderCorrelation(){
   const rows = STATE.FILTERED;
   const M = A.correlationMatrix(rows, A.HEATMAP_VARS);
-  const shortLabels = A.HEATMAP_VARS.map(v=>v.replace(/_/g," ").replace("Rate","Rt").replace("Availability","Avail").replace("Confidence Index","Conf.Idx").replace("Competitor Price Index","Comp.Price"));
-  $("#corrHeatmap").innerHTML = C.heatmap({labels:shortLabels, matrix:M});
+  const heatLabels = A.HEATMAP_VARS.map(k=>HEATMAP_LABELS[k]||k);
+  const heat = C.heatmap({
+    keys:A.HEATMAP_VARS, labels:heatLabels, groups:A.HEATMAP_GROUPS, matrix:M,
+    dark:isDarkTheme(), groupOf:A.HEATMAP_GROUP_OF, strongThreshold:STRONG_R
+  });
+  $("#corrHeatmap").innerHTML = heat.html;
+  heat.mount($("#corrHeatmap"));
+  $("#corrHeatmapLegend").innerHTML =
+    A.HEATMAP_GROUPS.map((g,i)=>`<span><span class="sw" style="background:${HEATMAP_GROUP_COLORS[i%4]}"></span>${g.name}</span>`).join("") +
+    `<span><span class="ring"></span>Strong relationship (|r| ≥ ${STRONG_R.toFixed(1)})</span>`;
+
+  renderCorrTopPairs(M);
+  renderCorrInterpretation(M, rows);
 
   const highlightVal = $("#corrHighlight").value; // "" or "Dimension:Value"
   const [hDim, hVal] = highlightVal ? highlightVal.split(":") : [null,null];
@@ -5056,6 +5232,65 @@ function renderCorrelation(){
   mounts.forEach((m,i)=>{
     m.chart.mount(cards[i], p => `${p.row.Store_ID} · ${p.row.City} · ${p.row.Category} · ${p.row.Week_Start}`);
   });
+}
+
+function corrStrengthWord(r){ return Math.abs(r)>=STRONG_R?"Strong":Math.abs(r)>=0.3?"Moderate":"Weak"; }
+function corrIsStructural(keyI,keyJ){ return A.HEATMAP_GROUP_OF[keyI]==="Outcomes" && A.HEATMAP_GROUP_OF[keyJ]==="Outcomes"; }
+
+/* Ranked list of the strongest pairwise relationships (by |r|) in the current
+   filter selection — the heatmap answers "where do I look," this answers
+   "what are the headline numbers." Pairs where both variables are financial
+   Outcomes are labelled "structural" since part of that correlation is
+   accounting math (Operating Profit = Sales − Total Expense, etc.), not an
+   independent behavioural relationship. */
+function renderCorrTopPairs(M){
+  const top = A.topCorrPairs(M, A.HEATMAP_VARS, 6);
+  $("#corrTopPairs").innerHTML = top.map((p,idx)=>{
+    const labelI = HEATMAP_LABELS[p.keyI]||p.keyI, labelJ = HEATMAP_LABELS[p.keyJ]||p.keyJ;
+    const structural = corrIsStructural(p.keyI, p.keyJ);
+    const strength = corrStrengthWord(p.r);
+    return `<li class="corr-rank-item">
+      <div class="corr-rank-num">${idx+1}</div>
+      <div class="corr-rank-body">
+        <div class="corr-rank-pair">${labelI} &harr; ${labelJ}</div>
+        <div class="corr-rank-meta">${strength} ${p.r>=0?"positive":"negative"}${structural?' · <span title="Both are financial outcomes; part of this link is accounting math">structural</span>':''}</div>
+      </div>
+      <div class="corr-rank-r ${p.r>=0?'pos':'neg'}">${p.r>=0?'+':''}${p.r.toFixed(2)}</div>
+    </li>`;
+  }).join("");
+}
+
+/* Auto-generated managerial narrative — built entirely from the live matrix so it
+   stays honest under every filter combination rather than reciting fixed numbers. */
+function renderCorrInterpretation(M, rows){
+  const allPairs = A.topCorrPairs(M, A.HEATMAP_VARS);
+  const behavioural = allPairs.filter(p=>!corrIsStructural(p.keyI,p.keyJ));
+  const structural = allPairs.filter(p=>corrIsStructural(p.keyI,p.keyJ));
+  const lbl = k => HEATMAP_LABELS[k]||k;
+
+  const topBehav = behavioural.slice(0,3);
+  const salesDriverPairs = behavioural.filter(p=>
+    (p.keyI==="Sales_Revenue" && A.HEATMAP_GROUP_OF[p.keyJ]==="Sales Drivers") ||
+    (p.keyJ==="Sales_Revenue" && A.HEATMAP_GROUP_OF[p.keyI]==="Sales Drivers")
+  ).sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+  const topSalesDriver = salesDriverPairs[0];
+  const weakestSalesDriver = salesDriverPairs[salesDriverPairs.length-1];
+  const profitPairs = behavioural.filter(p=>p.keyI==="Operating_Profit"||p.keyJ==="Operating_Profit").sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+  const topProfitDriver = profitPairs[0];
+
+  const paras = [];
+  paras.push(`<p><b>Headline:</b> across ${rows.length.toLocaleString()} filtered observations, the strongest non-structural relationship is <b>${lbl(topBehav[0].keyI)} &harr; ${lbl(topBehav[0].keyJ)}</b> (r = ${topBehav[0].r.toFixed(2)}, ${corrStrengthWord(topBehav[0].r).toLowerCase()} ${topBehav[0].r>=0?'positive':'negative'}), followed by ${lbl(topBehav[1].keyI)} &harr; ${lbl(topBehav[1].keyJ)} (r = ${topBehav[1].r.toFixed(2)}) and ${lbl(topBehav[2].keyI)} &harr; ${lbl(topBehav[2].keyJ)} (r = ${topBehav[2].r.toFixed(2)}).</p>`);
+  if(topSalesDriver){
+    paras.push(`<p><b>Sales drivers:</b> of the tracked Sales Drivers, <b>${lbl(topSalesDriver.keyI==="Sales_Revenue"?topSalesDriver.keyJ:topSalesDriver.keyI)}</b> tracks Sales Revenue most closely (r = ${topSalesDriver.r.toFixed(2)})${weakestSalesDriver && weakestSalesDriver!==topSalesDriver ? `, while ${lbl(weakestSalesDriver.keyI==="Sales_Revenue"?weakestSalesDriver.keyJ:weakestSalesDriver.keyI)} shows only a ${corrStrengthWord(weakestSalesDriver.r).toLowerCase()} link (r = ${weakestSalesDriver.r.toFixed(2)}) — a lever that moves less on its own than its budget attention might suggest` : ''}.</p>`);
+  }
+  if(topProfitDriver){
+    paras.push(`<p><b>Profit:</b> among behavioural (non-structural) variables, <b>${lbl(topProfitDriver.keyI==="Operating_Profit"?topProfitDriver.keyJ:topProfitDriver.keyI)}</b> has the strongest raw association with Operating Profit (r = ${topProfitDriver.r.toFixed(2)}). Treat this as a starting hypothesis, not a controlled estimate — §7's regression coefficients isolate each driver's effect while holding the others fixed.</p>`);
+  }
+  if(structural.length){
+    paras.push(`<p class="small"><b>Structural pairs to discount:</b> ${structural.slice(0,3).map(p=>`${lbl(p.keyI)} &harr; ${lbl(p.keyJ)} (r = ${p.r.toFixed(2)})`).join('; ')} — these sit inside the Outcomes group and are partly accounting identities (Operating Profit = Sales Revenue − Total Expense; Total Expense includes COGS Expense ≈ Sales Revenue × COGS Rate), so a high |r| here confirms the bookkeeping rather than revealing a new behavioural insight.</p>`);
+  }
+  paras.push(`<p class="small"><b>Reading caution:</b> correlation measures association, not causation, and every r above is a simple pairwise statistic — it does not control for the other drivers moving at the same time. For a causal-style, "holding everything else constant" estimate, use the regression coefficients in §7.</p>`);
+  $("#corrInterpretation").innerHTML = paras.join("");
 }
 
 /* ---------------------------------------------------------------------------------

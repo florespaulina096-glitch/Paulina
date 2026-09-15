@@ -5152,11 +5152,15 @@ function renderDescriptive(){
   const dimRows = [];
   groups.forEach((grows,key)=>{
     const gv = grows.map(r=>r[metric]).map(v=>pct?v*100:v);
-    dimRows.push({key, mean:Stat.mean(gv), std:Stat.std(gv), cv:Stat.cv(gv), n:grows.length});
+    // For the Store breakdown, show the store's city (already properly capitalized
+    // in the source data, e.g. "North Vancouver") rather than its internal code
+    // (e.g. "NVAN01") — easier for management to read at a glance.
+    const label = dim==="Store_ID" ? grows[0].City : key;
+    dimRows.push({key, label, mean:Stat.mean(gv), std:Stat.std(gv), cv:Stat.cv(gv), n:grows.length});
   });
   dimRows.sort((a,b)=>b.mean-a.mean);
   $("#descByDimTable").innerHTML = `<thead><tr><th>${dim.replace("_"," ")}</th><th>Mean</th><th>Std. dev.</th><th>CV %</th><th>n</th></tr></thead><tbody>${
-    dimRows.map(d=>`<tr><td>${d.key}</td><td>${C.fmtNum(d.mean,1)}${pct?'%':''}</td><td>${C.fmtNum(d.std,1)}</td><td>${d.cv.toFixed(1)}%</td><td>${d.n}</td></tr>`).join("")
+    dimRows.map(d=>`<tr><td>${d.label}</td><td>${C.fmtNum(d.mean,1)}${pct?'%':''}</td><td>${C.fmtNum(d.std,1)}</td><td>${d.cv.toFixed(1)}%</td><td>${d.n}</td></tr>`).join("")
   }</tbody>`;
 }
 

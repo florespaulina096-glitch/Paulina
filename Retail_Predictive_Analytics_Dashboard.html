@@ -239,6 +239,16 @@ table.data tbody tr:hover{background:var(--brand-soft);}
 .mt0{margin-top:0;}
 hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
 
+/* Scenario preset buttons (§10 What-If) */
+.preset-bar{display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 16px;}
+.preset-bar .btn.secondary.active-preset{background:var(--brand); color:#fff;}
+
+/* Assignment Coverage grid (§13) */
+.coverage-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px;}
+@media (max-width:800px){.coverage-grid{grid-template-columns:1fr;}}
+.cov-item{border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:12px; color:var(--sub); display:flex; flex-direction:column; gap:3px; background:var(--bg);}
+.cov-item b{color:var(--brand-ink); font-size:12.5px;}
+
 @media (max-width:640px){
   .grid.cols-2,.grid.cols-3,.grid.cols-4,.grid.cols-5{grid-template-columns:1fr;}
   .two-col{grid-template-columns:1fr;}
@@ -263,6 +273,7 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
       <a class="nav-link" href="#whatif">What-If</a>
       <a class="nav-link" href="#story">Storytelling</a>
       <a class="nav-link" href="#docs">Documentation</a>
+      <a class="nav-link" href="#coverage">Coverage</a>
     </nav>
     <button class="theme-toggle" id="themeToggle" type="button">🌓 Theme</button>
   </div>
@@ -366,6 +377,14 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
           <div class="table-wrap"><table class="data" id="segPromoTable"></table></div>
         </div>
       </div>
+      <hr class="sep">
+      <h4 class="mt0">Performance tiers — High / Mid / Low <span class="tip">?<span class="bubble">Every city × category combination in the current selection is ranked by operating margin (profit ÷ sales) and split into thirds — High, Mid and Low Performer — rather than relying on an existing label. Built specifically to compare the best third of the business to the worst third directly.</span></span></h4>
+      <div class="table-wrap"><table class="data" id="segTierTable"></table></div>
+      <p class="tag-desc" id="segTierCaption"></p>
+      <hr class="sep">
+      <h4 class="mt0">Most marketing-sensitive city × category <span class="tip">?<span class="bubble">Ranks each city-category combination by a simple regression of weekly Sales Revenue on Marketing Spend, fit separately within that combination, standardized so combinations with different sales scales are comparable.</span></span></h4>
+      <div class="table-wrap"><table class="data" id="segMktSensTable"></table></div>
+      <p class="tag-desc" id="segMktSensCaption"></p>
     </div>
   </section>
 
@@ -482,13 +501,26 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
   <section class="panel" id="whatif">
     <div class="panel-head"><h2>10 · What-If Analysis <span class="tip">?<span class="bubble">Every slider feeds directly into Model 1 and Model 2's fitted coefficients — nothing here is hard-coded arithmetic.</span></span></h2><span class="step-tag">Decision · What happens if…</span></div>
     <div class="panel-body">
+      <div class="control-group-title">Scenario presets</div>
+      <p class="tag-desc">Conservative and Optimistic apply a consistent set of % shifts to every driver below (belt-tightening vs. growth assumptions); Base resets every slider to the current filter selection's average. Dragging any individual slider moves you into a custom scenario.</p>
+      <div class="preset-bar">
+        <button class="btn secondary" data-preset="conservative" type="button">Conservative</button>
+        <button class="btn secondary active-preset" data-preset="base" type="button">Base (filtered average)</button>
+        <button class="btn secondary" data-preset="optimistic" type="button">Optimistic</button>
+      </div>
       <div class="control-group-title">Sales drivers</div>
       <div class="control-row" id="whatifSalesControls"></div>
       <div class="control-group-title">Expense drivers</div>
       <div class="control-row" id="whatifExpenseControls"></div>
-      <div style="margin:14px 0;"><button class="btn secondary" id="btnWhatifReset" type="button">Reset to filtered average</button></div>
-      <div class="grid cols-5" id="whatifKpis"></div>
+      <div class="grid cols-4" id="whatifKpis" style="margin-top:14px;"></div>
+      <div class="two-col" style="margin-top:14px;">
+        <div class="chart-card"><h4>Sales impact by driver</h4><div id="whatifContribSales"></div></div>
+        <div class="chart-card"><h4>Expense impact by driver</h4><div id="whatifContribExpense"></div></div>
+      </div>
       <div class="chart-card" style="margin-top:14px;"><h4>Baseline vs. scenario</h4><div id="whatifChart"></div></div>
+      <h4 style="margin-top:18px;">Profit &amp; probability impact</h4>
+      <div class="table-wrap"><table class="data" id="whatifProbTable"></table></div>
+      <p class="tag-desc" id="whatifProbCaption"></p>
     </div>
   </section>
 
@@ -509,6 +541,28 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
       <details class="collapsible note"><summary>Data &amp; methodology notes</summary><div class="inner small">
         <p>Source: embedded CSV, 3,328 rows, weekly grain, 8 stores × 4 categories × 104 weeks (Jan 2024 – Dec 2025). No rows were added, removed or altered. All statistics, regressions, forecasts and probabilities are computed in this browser session using plain JavaScript (see page source) — there is no server, database or external API call, so the dashboard works fully offline.</p>
       </div></details>
+    </div>
+  </section>
+
+  <!-- ============================= ASSIGNMENT COVERAGE ============================= -->
+  <section class="panel" id="coverage">
+    <div class="panel-head"><h2>13 · Assignment Coverage</h2><span class="step-tag">Reference</span></div>
+    <div class="panel-body">
+      <p class="tag-desc">Where each required element of the assignment lives in this dashboard.</p>
+      <div class="coverage-grid">
+        <div class="cov-item"><b>Descriptive statistics</b><span>§2 Descriptive Analytics — mean, median, min/max, std. dev., variance, coefficient of variation, 4-week rolling average, and first-vs-last % change, for any metric/segment.</span></div>
+        <div class="cov-item"><b>Variance analysis</b><span>§1 Executive KPIs and §3 Variance Analysis — sales &amp; expense variance in $ and %, by city, region, category and store format.</span></div>
+        <div class="cov-item"><b>Segmentation</b><span>Filters (city/region/category/format), §4 Segmentation's four rule-based cuts (city performance, category growth, cost, promotion sensitivity), plus a custom High/Mid/Low performance-tier segmentation and a marketing-sensitivity ranking by city × category.</span></div>
+        <div class="cov-item"><b>Probability</b><span>§5 Probability Analysis (historical frequency, with 95% bootstrap confidence intervals) and §10 What-If's Profit &amp; Probability Impact table (model-based, scenario vs. baseline) — both genuine probability calculations, not guesses.</span></div>
+        <div class="cov-item"><b>Correlation &amp; relationships</b><span>§6 Correlation &amp; Relationships — grouped heatmap, ranked strongest pairs, 8 scatter plots with fitted trendlines, and an auto-generated managerial interpretation.</span></div>
+        <div class="cov-item"><b>Regression — Model 1 (Sales)</b><span>§7 Predictive Modelling &amp; §10 What-If — 9-driver multivariate OLS regression on Sales Revenue.</span></div>
+        <div class="cov-item"><b>Regression — Model 2 (Expenses)</b><span>§7 Predictive Modelling &amp; §10 What-If — 8-driver multivariate OLS regression on Total Expense, chained from Model 1's predicted sales.</span></div>
+        <div class="cov-item"><b>Forecasting</b><span>§8 12-Week Forecast — linear trend + week-of-year seasonal decomposition, with 95%/80% prediction intervals.</span></div>
+        <div class="cov-item"><b>Model validation</b><span>§9 Model Validation — time-based train/test split (earliest 80% of weeks vs. most recent 20%), R², Adjusted R², MAE, RMSE and MAPE for both models.</span></div>
+        <div class="cov-item"><b>Interactive what-if</b><span>§10 What-If Analysis — 11 adjustable drivers across both models, Conservative/Base/Optimistic presets, per-driver contribution charts, and a linked profit &amp; probability impact table.</span></div>
+        <div class="cov-item"><b>Executive KPIs</b><span>§1 Executive KPI Summary — headline metrics curated to the management story, recomputed live from the current filter selection.</span></div>
+        <div class="cov-item"><b>Predictive storytelling</b><span>§11 Predictive Storytelling — Past → Diagnostic → Predictive → Uncertainty → Decision → Recommendation, labeled on every section's step-tag and narrated as six auto-generated steps.</span></div>
+      </div>
     </div>
   </section>
 
@@ -4702,6 +4756,43 @@ function segmentPromotionSensitivity(rows){
   });
   return arr.sort((a,b)=>b.corr-a.corr);
 }
+/* Custom segmentation: every city x category combination in the selection is ranked
+   by operating margin (not an existing label) and split into thirds. This asks a
+   different question than the city/category cuts above — "what does our best third
+   of the business look like operationally, compared to our worst third." */
+function segmentPerformanceTiers(rows){
+  const groups = groupBy(rows, r=>r.Store_ID+"||"+r.Category);
+  const arr = [];
+  groups.forEach(grows=>{
+    const s = varianceSummary(grows);
+    const margin = s.sActualSum? (s.sActualSum-s.eActualSum)/s.sActualSum*100 : 0;
+    arr.push({ city:grows[0].City, category:grows[0].Category, margin,
+      salesVarPct:s.salesVarPctTotal, expVarPct:s.expVarPctTotal, n:grows.length });
+  });
+  arr.sort((a,b)=>b.margin-a.margin);
+  const m = arr.length;
+  arr.forEach((a,i)=>{
+    const pct = m>1 ? i/(m-1) : 0; // 0 = best margin, 1 = worst
+    a.tier = pct < 1/3 ? "High Performer" : pct < 2/3 ? "Mid Performer" : "Low Performer";
+  });
+  return arr;
+}
+/* Ranks each city x category combination by how strongly its weekly Sales Revenue
+   moves with Marketing Spend: a simple OLS slope, standardized (beta * sd(x)/sd(y))
+   so combinations at very different sales scales are comparable. */
+function computeMarketingSensitivity(rows, minN){
+  minN = minN||20;
+  const groups = groupBy(rows, r=>r.Store_ID+"||"+r.Category);
+  const out = [];
+  groups.forEach(grows=>{
+    if(grows.length<minN) return;
+    const m = olsRegression(grows, "Sales_Revenue", ["Marketing_Spend"]);
+    const sdM = Stat.std(grows.map(r=>r.Marketing_Spend)), sdS = Stat.std(grows.map(r=>r.Sales_Revenue));
+    out.push({ city:grows[0].City, category:grows[0].Category, beta:m.beta[1],
+      stdBeta: sdS? m.beta[1]*sdM/sdS : 0, r2:m.r2, n:grows.length });
+  });
+  return out.sort((a,b)=>b.stdBeta-a.stdBeta);
+}
 
 /* ---------------------------------------------------------------------------------
    CORRELATION SET — the 8 required business relationships + a broader matrix
@@ -4897,6 +4988,7 @@ function probWithinRange(mean, sd, lo, hi){
 GLOBAL.Analytics = {
   groupBy, varianceRow, varianceSummary, varianceByGroup,
   segmentStores, segmentCategories, segmentCost, segmentPromotionSensitivity,
+  segmentPerformanceTiers, computeMarketingSensitivity,
   CORE_PAIRS, HEATMAP_VARS, HEATMAP_GROUPS, HEATMAP_GROUP_OF, correlationMatrix, topCorrPairs,
   MODEL1_X, MODEL2_X, trainModel1, trainModel2, timeSplit, validateModel,
   weeklyAggregate, fitTrendSeasonal, forecast12,
@@ -5236,6 +5328,48 @@ function renderSegmentation(){
   $("#segPromoTable").innerHTML = `<thead><tr><th>Category</th><th>r (Discount vs Transactions)</th><th>Segment</th></tr></thead><tbody>${
     promo.map(p=>`<tr><td>${p.category}</td><td>${p.corr.toFixed(2)}</td><td><span class="chip ${p.segment==='Promotion-sensitive'?'good':'neutral'}">${p.segment}</span></td></tr>`).join("")
   }</tbody>`;
+
+  renderPerformanceTiers(rows);
+  renderMarketingSensitivity(rows);
+}
+const TIER_CHIP = {"High Performer":"good","Mid Performer":"warn","Low Performer":"bad"};
+function renderPerformanceTiers(rows){
+  const perf = A.segmentPerformanceTiers(rows);
+  if(perf.length<3){
+    $("#segTierTable").innerHTML = `<tbody><tr><td class="small" style="text-align:left;">Broaden the city/category filter — at least 3 city × category combinations are needed to split into three tiers.</td></tr></tbody>`;
+    $("#segTierCaption").textContent = "";
+    return;
+  }
+  const tiers = ["High Performer","Mid Performer","Low Performer"].map(t=>{
+    const grp = perf.filter(a=>a.tier===t);
+    if(!grp.length) return null;
+    return { tier:t, count:grp.length,
+      avgMargin: Stat.mean(grp.map(a=>a.margin)),
+      avgSalesVar: Stat.mean(grp.map(a=>a.salesVarPct)),
+      avgExpVar: Stat.mean(grp.map(a=>a.expVarPct)),
+      members: grp.map(a=>`${a.city} · ${a.category}`).join(", ") };
+  }).filter(Boolean);
+  $("#segTierTable").innerHTML = `<thead><tr><th>Tier</th><th>Combos</th><th>Avg Margin %</th><th>Avg Sales Var %</th><th>Avg Expense Var %</th></tr></thead><tbody>${
+    tiers.map(t=>`<tr><td><span class="chip ${TIER_CHIP[t.tier]}">${t.tier}</span></td>` +
+      `<td style="text-align:left;white-space:normal;font-size:11px;">${t.members} <span class="small">(n=${t.count})</span></td>` +
+      `<td>${t.avgMargin.toFixed(1)}%</td><td class="${t.avgSalesVar>=0?'pos':'neg'}">${t.avgSalesVar.toFixed(1)}%</td>` +
+      `<td class="${t.avgExpVar<=0?'pos':'neg'}">${t.avgExpVar.toFixed(1)}%</td></tr>`).join("")
+  }</tbody>`;
+  const spread = tiers.length>=2 ? (tiers[0].avgMargin-tiers[tiers.length-1].avgMargin).toFixed(1) : "0.0";
+  $("#segTierCaption").textContent = `The High tier runs ${spread} percentage points of operating margin ahead of the Low tier in this selection — a gap this margin-based cut makes visible that the city or category views alone would average away.`;
+}
+function renderMarketingSensitivity(rows){
+  const sens = A.computeMarketingSensitivity(rows);
+  if(!sens.length){
+    $("#segMktSensTable").innerHTML = `<tbody><tr><td class="small" style="text-align:left;">Broaden the filter — each city × category combination needs at least 20 weeks of data to fit its own regression.</td></tr></tbody>`;
+    $("#segMktSensCaption").textContent = "";
+    return;
+  }
+  const top = sens.slice(0,5);
+  $("#segMktSensTable").innerHTML = `<thead><tr><th>City</th><th>Category</th><th>Std. coefficient</th><th>$ / $ marketing</th><th>R²</th></tr></thead><tbody>${
+    top.map(s=>`<tr><td>${s.city}</td><td>${s.category}</td><td>${s.stdBeta.toFixed(2)}</td><td>${C.fmtNum(s.beta,2)}</td><td>${s.r2.toFixed(2)}</td></tr>`).join("")
+  }</tbody>`;
+  $("#segMktSensCaption").textContent = `${top[0].city} · ${top[0].category} shows the strongest marketing response in the current selection — each additional dollar of weekly marketing spend there is associated with roughly $${top[0].beta.toFixed(2)} of additional weekly sales, holding that combination's own history fixed.`;
 }
 
 /* ---------------------------------------------------------------------------------
@@ -5600,6 +5734,19 @@ const WHATIF_DRIVERS = [
   {k:"Shipping_Cost_per_Online_Order", label:"Shipping Cost / Online Order ($)", group:"expense", step:0.1, decimals:2},
   {k:"Return_Rate", label:"Return Rate", group:"expense", step:0.001, decimals:3, pct:true}
 ];
+/* Conservative = belt-tightening (lower traffic/marketing/conversion, deeper
+   discounting to defend volume, higher costs); Optimistic = growth assumptions.
+   Each factor multiplies that driver's filtered-average baseline; sliders clamp
+   to the data's observed min/max so a preset can never push past what the model
+   was actually fit on. */
+const WHATIF_PRESETS = {
+  conservative: { Foot_Traffic:0.95, Conversion_Rate:0.97, Avg_Transaction_Value:0.98, Marketing_Spend:0.85,
+    Discount_Rate:1.15, Inventory_Availability:0.97, COGS_Rate:1.03, Labor_Hours:0.95, Avg_Hourly_Wage:1.02,
+    Shipping_Cost_per_Online_Order:1.05, Return_Rate:1.10 },
+  optimistic: { Foot_Traffic:1.08, Conversion_Rate:1.05, Avg_Transaction_Value:1.04, Marketing_Spend:1.15,
+    Discount_Rate:0.85, Inventory_Availability:1.03, COGS_Rate:0.97, Labor_Hours:1.03, Avg_Hourly_Wage:1.01,
+    Shipping_Cost_per_Online_Order:0.95, Return_Rate:0.90 }
+};
 function buildWhatifControls(){
   function control(d){
     const vals = STATE.ALL.map(r=>r[d.k]);
@@ -5613,11 +5760,31 @@ function buildWhatifControls(){
   $("#whatifSalesControls").innerHTML = WHATIF_DRIVERS.filter(d=>d.group==="sales").map(control).join("");
   $("#whatifExpenseControls").innerHTML = WHATIF_DRIVERS.filter(d=>d.group==="expense").map(control).join("");
   WHATIF_DRIVERS.forEach(d=>{
-    $("#ws_"+d.k).addEventListener("input", ()=>{ STATE.whatif[d.k] = parseFloat($("#ws_"+d.k).value); recomputeWhatif(); });
+    $("#ws_"+d.k).addEventListener("input", ()=>{
+      STATE.whatif[d.k] = parseFloat($("#ws_"+d.k).value);
+      $$(".preset-bar .btn").forEach(b=>b.classList.remove("active-preset"));
+      recomputeWhatif();
+    });
   });
-  $("#btnWhatifReset").addEventListener("click", ()=>{ setWhatifBaseline(); recomputeWhatif(); });
+  $$(".preset-bar .btn[data-preset]").forEach(b=>{
+    b.addEventListener("click", ()=> applyPreset(b.dataset.preset));
+  });
   STATE.whatif.built = true;
   setWhatifBaseline();
+  recomputeWhatif();
+}
+function applyPreset(name){
+  $$(".preset-bar .btn").forEach(b=> b.classList.toggle("active-preset", b.dataset.preset===name));
+  if(name==="base"){ setWhatifBaseline(); recomputeWhatif(); return; }
+  const mult = WHATIF_PRESETS[name];
+  WHATIF_DRIVERS.forEach(d=>{
+    const base = STATE.whatifBaseline[d.k];
+    const slider = $("#ws_"+d.k);
+    const lo = parseFloat(slider.min), hi = parseFloat(slider.max);
+    const raw = base * (mult[d.k]!==undefined ? mult[d.k] : 1);
+    STATE.whatif[d.k] = Math.min(hi, Math.max(lo, raw));
+    slider.value = STATE.whatif[d.k];
+  });
   recomputeWhatif();
 }
 function setWhatifBaseline(){
@@ -5648,21 +5815,19 @@ function recomputeWhatif(){
   const rows = STATE.FILTERED.length? STATE.FILTERED : STATE.ALL;
   const targetSalesBudget = Stat.mean(rows.map(r=>r.Sales_Budget));
   const targetExpBudget = Stat.mean(rows.map(r=>r.Expense_Budget));
-  const probMeet = A.probAboveThreshold(predictedSales, targetSalesBudget, m1.residStd);
-  const probOverrun = A.probAboveThreshold(predictedExpense, targetExpBudget, m2.residStd);
 
   const base = STATE.whatifBaseline||{};
   const baseXrow = Object.assign({}, base);
   const baseSales = m1.predict(baseXrow);
-  const baseExpense = m2.predict(Object.assign({}, baseXrow, {Sales_Revenue: baseSales}));
+  const baseXrow2 = Object.assign({}, baseXrow, {Sales_Revenue: baseSales});
+  const baseExpense = m2.predict(baseXrow2);
   const baseProfit = baseSales-baseExpense;
 
   $("#whatifKpis").innerHTML = [
     kpiCard("Predicted Sales", C.fmtCAD(predictedSales), (predictedSales-baseSales>=0?"+":"")+C.fmtCAD(predictedSales-baseSales)+" vs baseline", predictedSales>=baseSales?"good":"bad"),
     kpiCard("Predicted Expense", C.fmtCAD(predictedExpense), (predictedExpense-baseExpense>=0?"+":"")+C.fmtCAD(predictedExpense-baseExpense)+" vs baseline", predictedExpense<=baseExpense?"good":"bad"),
     kpiCard("Operating Profit", C.fmtCAD(profit), (profit-baseProfit>=0?"+":"")+C.fmtCAD(profit-baseProfit)+" vs baseline", profit>=baseProfit?"good":"bad"),
-    kpiCard("Profit Margin", margin.toFixed(1)+"%"),
-    kpiCard("P(Meet Sales Target) / P(Expense Overrun)", probMeet.toFixed(0)+"% / "+probOverrun.toFixed(0)+"%")
+    kpiCard("Profit Margin", margin.toFixed(1)+"%", (margin-((baseSales?baseProfit/baseSales*100:0))>=0?"+":"")+(margin-(baseSales?baseProfit/baseSales*100:0)).toFixed(1)+"pt vs baseline", margin>=(baseSales?baseProfit/baseSales*100:0)?"good":"bad")
   ].join("");
 
   $("#whatifChart").innerHTML = C.barChart({
@@ -5674,6 +5839,57 @@ function recomputeWhatif(){
     colorFn:d=>d.label.includes("scenario")?"#1e5fd9":"#9aa6c2",
     yTickFmt:v=>C.fmtCAD(v,true), width:760, height:260
   });
+
+  // Per-driver contribution to the scenario delta = that model's fitted coefficient
+  // x (scenario value - baseline value) — a direct linear decomposition, since
+  // both models are linear with no interaction terms.
+  const salesContrib = WHATIF_DRIVERS.filter(d=>d.group==="sales").map(d=>{
+    const idx = A.MODEL1_X.indexOf(d.k);
+    if(idx<0) return null;
+    return { label:d.label.replace(/\s*\([^)]*\)/,""), value: m1.beta[idx+1]*(xrow[d.k]-baseXrow[d.k]) };
+  }).filter(Boolean);
+  $("#whatifContribSales").innerHTML = C.barChart({
+    data:salesContrib, horizontal:true, colorFn:d=>d.value>=0?"#0f8a5f":"#c22b3a", padLeft:150,
+    yTickFmt:v=>C.fmtCAD(v,true), width:520, height:Math.max(180,salesContrib.length*34+40)
+  });
+
+  const expenseLabel = { Sales_Revenue:"Sales volume (cascaded)", Marketing_Spend:"Marketing Spend" };
+  const expenseContrib = A.MODEL2_X.filter(k=>k!=="Utilities_Expense").map(k=>{
+    const idx = A.MODEL2_X.indexOf(k);
+    const before = baseXrow2[k], after = xrow2[k];
+    const wDriver = WHATIF_DRIVERS.find(d=>d.k===k);
+    return { label: expenseLabel[k] || (wDriver?wDriver.label.replace(/\s*\([^)]*\)/,""):k.replace(/_/g," ")),
+      value: m2.beta[idx+1]*(after-before) };
+  });
+  $("#whatifContribExpense").innerHTML = C.barChart({
+    data:expenseContrib, horizontal:true, colorFn:d=>d.value>=0?"#c22b3a":"#0f8a5f", padLeft:150,
+    yTickFmt:v=>C.fmtCAD(v,true), width:520, height:Math.max(180,expenseContrib.length*34+40)
+  });
+
+  // Profit & probability impact — same normal-approximation approach as §5, with
+  // sigma_profit = sqrt(sigma_sales^2 + sigma_expense^2) assuming independent errors.
+  const sigmaProfit = Math.sqrt(m1.residStd*m1.residStd + m2.residStd*m2.residStd);
+  const scenarioP = {
+    sales: A.probAboveThreshold(predictedSales, targetSalesBudget, m1.residStd),
+    expFav: A.probBelowThreshold(predictedExpense, targetExpBudget, m2.residStd),
+    profit: A.probAboveThreshold(profit, 0, sigmaProfit)
+  };
+  const baselineP = {
+    sales: A.probAboveThreshold(baseSales, targetSalesBudget, m1.residStd),
+    expFav: A.probBelowThreshold(baseExpense, targetExpBudget, m2.residStd),
+    profit: A.probAboveThreshold(baseProfit, 0, sigmaProfit)
+  };
+  function probRow(label, base, scen){
+    let d = Math.round(scen-base);
+    if(d===0) d = 0; // normalize -0 from float subtraction so it doesn't print "-0pt"
+    return `<tr><td>${label}</td><td>${base.toFixed(0)}%</td><td>${scen.toFixed(0)}%</td><td class="${d>=0?'pos':'neg'}">${d>=0?'+':''}${d}pt</td></tr>`;
+  }
+  $("#whatifProbTable").innerHTML = `<thead><tr><th>Probability</th><th>Baseline</th><th>Scenario</th><th>Δ</th></tr></thead><tbody>
+    ${probRow("Meet/beat sales budget", baselineP.sales, scenarioP.sales)}
+    ${probRow("Stay within expense budget", baselineP.expFav, scenarioP.expFav)}
+    ${probRow("Positive operating profit", baselineP.profit, scenarioP.profit)}
+  </tbody>`;
+  $("#whatifProbCaption").textContent = "Probabilities use the same normal-approximation formula as §5 (P(actual ≥ threshold) = Φ((predicted−threshold)/σ)), with σ taken from each model's own residual standard deviation (§7); the profit probability combines both models' uncertainty as σ_profit = √(σ_sales² + σ_expense²), assuming independent errors.";
 }
 
 /* ---------------------------------------------------------------------------------
@@ -5715,7 +5931,7 @@ function renderStory(){
 function renderStaticDocs(){
   $("#docModelInfo").innerHTML = `<p><b>Model 1 (Sales Revenue)</b> and <b>Model 2 (Total Expense)</b> are both Ordinary Least Squares multiple linear regressions, solved in-browser via the normal-equations method (X'X)⁻¹X'y — see <code>core.js → olsRegression</code>. Both are trained once on the full ${STATE.ALL.length.toLocaleString()}-row dataset so What-If results stay consistent regardless of which filter you're viewing. Predictors were chosen from the assignment's suggested driver lists, mapped to the columns present in the source file; see §7's "Variable selection" panel for the full inclusion/exclusion rationale.</p>`;
   $("#docForecastLogic").innerHTML = `<p>The 12-week forecast (§8) decomposes the filtered weekly series into a <b>linear trend</b> (OLS on the week index) and a <b>week-of-year seasonal index</b> (average detrended value per calendar week, re-centered to zero). The forecast continues the trend line and re-applies the matching seasonal index for each of the next 12 weeks. Uncertainty bands are ±1.96×σ (95%) and ±1.28×σ (80%), where σ is the standard deviation of the in-sample residuals — a standard normal-approximation prediction interval.</p>`;
-  $("#docWhatifEngine").innerHTML = `<p>Each slider in §10 sets one input to Model 1 or Model 2. Sales-side sliders feed Model 1 directly; the resulting <i>predicted</i> Sales Revenue is then fed into Model 2 as its "Sales Revenue" predictor (chaining the two models), together with the expense-side sliders. Every non-slider predictor (e.g. Competitor Price Index, Holiday Flag) is held at its mean over the current filter selection. Probabilities use the normal-approximation formula P(actual ≥ threshold) = Φ((predicted − threshold)/residual σ), where σ comes from each model's own residual standard deviation (§7).</p>`;
+  $("#docWhatifEngine").innerHTML = `<p>Each slider in §10 sets one input to Model 1 or Model 2. Sales-side sliders feed Model 1 directly; the resulting <i>predicted</i> Sales Revenue is then fed into Model 2 as its "Sales Revenue" predictor (chaining the two models), together with the expense-side sliders. Every non-slider predictor (e.g. Competitor Price Index, Holiday Flag) is held at its mean over the current filter selection. The Conservative/Base/Optimistic presets apply a fixed set of % multipliers to every slider's baseline value in one click; dragging any slider afterward moves you into a custom scenario. The driver-contribution charts decompose each model's predicted change into per-driver dollar amounts (coefficient × the slider's move from baseline), which is exact because both models are linear with no interaction terms. Probabilities use the normal-approximation formula P(actual ≥ threshold) = Φ((predicted − threshold)/residual σ), where σ comes from each model's own residual standard deviation (§7); the combined profit probability uses σ_profit = √(σ_sales² + σ_expense²).</p>`;
   $("#docRecommendations").innerHTML = `<p>See §11 step 6 for the live, data-driven recommendation list, which updates as you change filters. In brief: focus operational effort on the statistically significant, large-coefficient drivers in Model 1; target the lowest-ranked "Low-performing"/"High-cost" segments from §4 for a closer look; use discount levers selectively based on each category's measured promotion sensitivity; and refresh the models each quarter using §9's validation metrics as a trigger.</p>`;
 }
 

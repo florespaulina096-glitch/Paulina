@@ -154,8 +154,26 @@ details.note{background:var(--warn-soft); border-color:var(--warn);}
 .corr-rank-pair{font-size:12.5px; font-weight:700; color:var(--ink);}
 .corr-rank-meta{font-size:11px; color:var(--sub); margin-top:1px;}
 .corr-rank-r{flex:none; font-family:var(--mono); font-weight:800; font-size:13px; color:var(--ink);}
-.corr-interp p{font-size:12.5px; color:var(--ink); line-height:1.6;}
-.corr-interp p.small{color:var(--sub);}
+
+/* Generic auto-generated "managerial interpretation" box — used by the
+   correlation heatmap (§6) and the sales-variance histogram (§5) alike, so
+   every data-driven narrative in the dashboard reads the same way. */
+.interp-box p{font-size:12.5px; color:var(--ink); line-height:1.6;}
+.interp-box p.small{color:var(--sub);}
+
+/* Sales-variance histogram (§5) */
+.hist-stats{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px;}
+.hist-stat{flex:1; min-width:110px; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 12px;}
+.hist-stat .lbl{font-size:10px; text-transform:uppercase; letter-spacing:.03em; color:var(--sub); font-weight:700;}
+.hist-stat .val{font-size:16px; font-weight:800; margin-top:2px; font-variant-numeric:tabular-nums;}
+.hist-stat .val.good{color:var(--good);}
+.hist-stat .val.bad{color:var(--bad);}
+.histogram-svg{width:100%; height:auto; display:block;}
+.histogram-svg .hist-bar{cursor:pointer; transition:filter .1s;}
+.histogram-svg .hist-bar:hover, .histogram-svg .hist-bar:focus{filter:brightness(1.12);}
+.hist-legend{display:flex; flex-wrap:wrap; gap:16px; justify-content:center; margin-top:10px; font-size:11px; color:var(--sub);}
+.hist-legend .sw{width:9px; height:9px; border-radius:2px; display:inline-block; margin-right:5px; vertical-align:-1px;}
+.hist-legend .ln{display:inline-block; width:14px; height:0; border-top:2px dashed var(--ink); margin-right:5px; vertical-align:3px;}
 
 /* Tables */
 .table-wrap{overflow-x:auto; border:1px solid var(--line); border-radius:10px;}
@@ -345,7 +363,12 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
       <div class="grid cols-3" id="probCards"></div>
       <hr class="sep">
       <div class="two-col">
-        <div class="chart-card"><h4>Distribution of weekly Sales Variance %</h4><div id="probHist"></div><p class="small">Dashed line marks 0% (on-budget). Share of mass to the right of the line is the historical probability of meeting or beating budget.</p></div>
+        <div class="chart-card">
+          <h4>Distribution of weekly Sales Variance %</h4>
+          <div class="hist-stats" id="histStats"></div>
+          <div id="probHist"></div>
+          <div class="hist-legend" id="histLegend"></div>
+        </div>
         <div class="control">
           <h4 class="mt0" style="text-transform:none;color:var(--ink);font-size:13px;">Probability future sales fall within a range</h4>
           <p class="small">Uses the 12-week forecast's mean and residual standard deviation (§7) as a normal approximation: P(lo ≤ X ≤ hi) = Φ((hi−μ)/σ) − Φ((lo−μ)/σ).</p>
@@ -353,6 +376,10 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
           <label style="margin-top:8px;">Upper bound ($) <input type="number" id="rangeHi" style="width:110px"></label>
           <div id="rangeProbOut" style="margin-top:10px;font-size:14px;font-weight:800;"></div>
         </div>
+      </div>
+      <div class="chart-card interp-box" style="margin-top:14px;">
+        <h4>Interpretation <span class="tip">?<span class="bubble">Auto-generated from the current filter selection — recomputes with every filter change.</span></span></h4>
+        <div id="histInterpretation"></div>
       </div>
     </div>
   </section>
@@ -374,7 +401,7 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
           <ol class="corr-rank-list" id="corrTopPairs"></ol>
         </div>
       </div>
-      <div class="chart-card corr-interp" style="margin-top:14px;">
+      <div class="chart-card interp-box" style="margin-top:14px;">
         <h4>Managerial interpretation <span class="tip">?<span class="bubble">Auto-generated from the correlation matrix above — recomputes with every filter change. Correlation describes association, not causation; see §7 for regression coefficients that hold other drivers constant.</span></span></h4>
         <div id="corrInterpretation"></div>
       </div>
@@ -4434,30 +4461,100 @@ function mountHeatmapHover(svg, keys, labels, matrix, groupOf, strongThreshold){
 }
 
 /* =====================================================================================
-   HISTOGRAM — for distribution panels (e.g. weekly sales-variance% distribution used
-   in the probability section).
+   HISTOGRAM — distribution panels (e.g. the weekly Sales Variance % distribution in
+   the Probability section). Bars are colour-coded by which side of `refLine` they
+   fall on (favourable vs. unfavourable) — a legitimate use of the status palette,
+   since the sign here *is* literally the status, not an arbitrary series identity.
+   Ships real Y-axis gridlines/ticks, a labeled reference line, a mean marker, and a
+   per-bar hover/focus tooltip (mount()) — the same interaction layer as the
+   scatter plots and heatmap, so every chart in the dashboard behaves the same way.
    ===================================================================================== */
-function histogram({width=460,height=240,data=[],bins=16,markLine=null,padLeft=48,padBottom=32}){
-  const W=width,H=height,padTop=14,padRight=14;
+function histogram({width=460,height=280,data=[],bins=16,refLine=0,refLabel="On budget",xLabel="",yLabel="Weeks",xFmt,padLeft=48,padBottom=42}){
+  const W=width,H=height,padTop=18,padRight=16;
+  const id = "hst"+(_scatterSeq++);
   const min=Math.min(...data), max=Math.max(...data);
   const step=(max-min)/bins || 1;
   const counts = new Array(bins).fill(0);
   data.forEach(v=>{ let idx=Math.floor((v-min)/step); if(idx>=bins) idx=bins-1; if(idx<0) idx=0; counts[idx]++; });
   const maxCount = Math.max(...counts);
-  const x = scaleLinear([min,max],[padLeft,W-padRight]);
-  const y = scaleLinear([0,maxCount],[H-padBottom,padTop]);
-  let out = `<svg viewBox="0 0 ${W} ${H}" role="img">`;
-  out += `<line class="axis" x1="${padLeft}" x2="${W-padRight}" y1="${H-padBottom}" y2="${H-padBottom}"/>`;
-  counts.forEach((c,i)=>{
-    const x0=x(min+i*step), x1=x(min+(i+1)*step);
-    out += `<rect x="${x0}" y="${y(c)}" width="${Math.max(1,x1-x0-1)}" height="${H-padBottom-y(c)}" fill="${COLORS[0]}" opacity="0.75"><title>${fmtNum(min+i*step)}–${fmtNum(min+(i+1)*step)}: ${c} weeks</title></rect>`;
+  const mean = data.reduce((s,v)=>s+v,0)/data.length;
+  const xf = xFmt || (v=>fmtNum(v,1)+"%");
+
+  const {ticks:xt,min:xMin,max:xMax} = niceTicks(min,max,6);
+  const {ticks:yt,max:yMax} = niceTicks(0,maxCount,4);
+  const x = scaleLinear([xMin,xMax],[padLeft,W-padRight]);
+  const y = scaleLinear([0,yMax],[H-padBottom,padTop]);
+
+  let out = `<svg viewBox="0 0 ${W} ${H}" role="img" id="${id}" data-w="${W}" data-h="${H}" class="histogram-svg">`;
+
+  // Y gridlines + axis title (rotated), solid hairlines per the dashboard's chart standard.
+  yt.forEach(t=>{
+    out += `<line x1="${padLeft}" x2="${W-padRight}" y1="${y(t)}" y2="${y(t)}" stroke="var(--line)" stroke-width="1"/>`;
+    out += `<text class="axis" x="${padLeft-8}" y="${y(t)+3}" text-anchor="end" font-size="9.5">${fmtNum(t,0)}</text>`;
   });
-  [min, (min+max)/2, max].forEach(t=> out += `<text class="axis" x="${x(t)}" y="${H-padBottom+14}" text-anchor="middle" font-size="9.5">${fmtNum(t,1)}</text>`);
-  if(markLine!==null && markLine>=min && markLine<=max){
-    out += `<line x1="${x(markLine)}" x2="${x(markLine)}" y1="${padTop}" y2="${H-padBottom}" stroke="var(--bad)" stroke-width="2" stroke-dasharray="4,3"/>`;
+  out += `<text class="axis" x="${-(H/2)}" y="14" transform="rotate(-90)" text-anchor="middle" font-size="10" font-weight="700">${esc(yLabel)}</text>`;
+
+  // Bars — a 2px surface-color gap between adjacent bars (never a border) keeps
+  // them visually distinct; colour splits at the reference line (favourable vs.
+  // unfavourable), which is the actual meaning of the sign here.
+  counts.forEach((c,i)=>{
+    const binLo = min+i*step, binHi = min+(i+1)*step, binMid = (binLo+binHi)/2;
+    const x0=x(binLo), x1=x(binHi);
+    const favourable = binMid >= refLine;
+    out += `<rect class="hist-bar" data-i="${i}" x="${x0}" y="${y(c)}" width="${Math.max(1,x1-x0-2)}" height="${H-padBottom-y(c)}" fill="${favourable?'var(--good)':'var(--bad)'}" opacity="0.82"/>`;
+  });
+
+  // X ticks
+  xt.forEach(t=> out += `<text class="axis" x="${x(t)}" y="${H-padBottom+16}" text-anchor="middle" font-size="9.5">${xf(t)}</text>`);
+  out += `<line class="axis" x1="${padLeft}" x2="${W-padRight}" y1="${H-padBottom}" y2="${H-padBottom}"/>`;
+  out += `<text class="axis" x="${(padLeft+W-padRight)/2}" y="${H-6}" text-anchor="middle" font-size="10" font-weight="700">${esc(xLabel)}</text>`;
+
+  // Reference line — solid, labeled directly on the chart (not just a caption)
+  // so the "favourable vs. unfavourable" split is self-explanatory at a glance.
+  if(refLine>=xMin && refLine<=xMax){
+    const rx = x(refLine);
+    out += `<line x1="${rx}" x2="${rx}" y1="${padTop}" y2="${H-padBottom}" stroke="var(--ink)" stroke-width="2"/>`;
+    out += `<text x="${rx+6}" y="${padTop+10}" font-size="10" font-weight="700" fill="var(--ink)">${esc(xf(refLine))} · ${esc(refLabel)}</text>`;
+  }
+  // Mean marker — a small triangle on the axis, distinct from the reference line,
+  // giving the reader one more concrete number without labeling every bar.
+  if(mean>=xMin && mean<=xMax){
+    const mx = x(mean);
+    out += `<polygon points="${mx-5},${H-padBottom+2} ${mx+5},${H-padBottom+2} ${mx},${H-padBottom-7}" fill="var(--brand)"/>`;
+    out += `<text x="${mx}" y="${H-padBottom+28}" text-anchor="middle" font-size="9.5" font-weight="700" fill="var(--brand-ink)">Mean ${esc(xf(mean))}</text>`;
   }
   out += `</svg>`;
-  return out;
+
+  return { html: out, id,
+    mount(container){ mountHistogramHover(container.querySelector("#"+id), counts, min, step, data.length, refLine, xf); } };
+}
+
+function mountHistogramHover(svg, counts, min, step, total, refLine, xf){
+  if(!svg) return;
+  const tip = ensureTooltip();
+  svg.querySelectorAll(".hist-bar").forEach(bar=>{
+    const i = +bar.dataset.i;
+    function show(){
+      const lo = min+i*step, hi = min+(i+1)*step, mid=(lo+hi)/2, c = counts[i];
+      const pct = total? (c/total*100) : 0;
+      const favourable = mid>=refLine;
+      tip.innerHTML = `<div class="ct-meta">${esc(xf(lo))} to ${esc(xf(hi))}</div>`+
+        `<div class="ct-row"><span class="ct-k">Weeks</span><span class="ct-v">${c}</span></div>`+
+        `<div class="ct-row"><span class="ct-k">Share of total</span><span class="ct-v">${pct.toFixed(1)}%</span></div>`+
+        `<div class="ct-row"><span class="ct-k">Status</span><span class="ct-v">${favourable?'Favourable':'Unfavourable'}</span></div>`;
+      tip.hidden = false;
+      const r = bar.getBoundingClientRect();
+      let left = r.left+r.width/2-tip.offsetWidth/2, top = r.top-tip.offsetHeight-10;
+      if(top<8) top = r.bottom+10;
+      tip.style.left = Math.max(8,left)+"px"; tip.style.top = top+"px";
+    }
+    function hide(){ tip.hidden = true; }
+    bar.setAttribute("tabindex","0");
+    bar.addEventListener("pointerenter", show);
+    bar.addEventListener("focus", show);
+    bar.addEventListener("pointerleave", hide);
+    bar.addEventListener("blur", hide);
+  });
 }
 
 /* Mini sparkline for KPI cards */
@@ -5128,8 +5225,7 @@ function renderProbability(){
     card("P(Positive Operating Profit)", profit, "Historical frequency: share of weeks with Operating Profit &gt; $0.")
   ].join("");
 
-  const varPct = rows.map(r=>(r.Sales_Revenue-r.Sales_Budget)/r.Sales_Budget*100);
-  $("#probHist").innerHTML = C.histogram({data:varPct, markLine:0});
+  renderVarianceHistogram(rows, meet);
 
   // default the future-sales range inputs to ± 1 std dev around the current forecast
   const fc = getForecastCache("Sales_Revenue");
@@ -5150,6 +5246,45 @@ function renderRangeProb(){
   if(isNaN(lo)||isNaN(hi)) return;
   const p = A.probWithinRange(nextWeek.point, sd, lo, hi);
   $("#rangeProbOut").innerHTML = `P(next week's sales ∈ [${C.fmtCAD(lo)}, ${C.fmtCAD(hi)}]) ≈ <span style="color:var(--brand-ink)">${p.toFixed(1)}%</span><br><span class="small" style="font-weight:400;">Forecast mean ${C.fmtCAD(nextWeek.point)}, residual σ = ${C.fmtCAD(sd)}</span>`;
+}
+
+/* Distribution of weekly Sales Variance % — favourable (met/beat budget) weeks
+   colour-coded green, unfavourable red, split at the labeled 0% reference line.
+   `meet` is the already-computed P(Meet Sales Budget) card so the favourable-share
+   number quoted here always matches the KPI card above it exactly (both come from
+   the same underlying condition: Sales Revenue >= Sales Budget). */
+function renderVarianceHistogram(rows, meet){
+  const varPct = rows.map(r=>(r.Sales_Revenue-r.Sales_Budget)/r.Sales_Budget*100);
+  const mean = Stat.mean(varPct), median = Stat.median(varPct), sd = Stat.std(varPct);
+
+  $("#histStats").innerHTML = [
+    ["Mean variance", C.fmtPct(mean,1), mean>=0?"good":"bad"],
+    ["Median variance", C.fmtPct(median,1), median>=0?"good":"bad"],
+    ["Std. deviation", C.fmtPct(sd,1), ""],
+    ["Favourable weeks", meet.p.toFixed(1)+"%", meet.p>=50?"good":"bad"]
+  ].map(([lbl,val,cls])=>`<div class="hist-stat"><div class="lbl">${lbl}</div><div class="val ${cls}">${val}</div></div>`).join("");
+
+  const hist = C.histogram({
+    data: varPct, xLabel:"Sales Variance % (Actual vs. Budget)", yLabel:"Weeks",
+    refLine:0, refLabel:"On budget", xFmt:v=>(v>=0?"+":"")+v.toFixed(0)+"%"
+  });
+  $("#probHist").innerHTML = hist.html;
+  hist.mount($("#probHist"));
+  $("#histLegend").innerHTML =
+    `<span><span class="sw" style="background:var(--good)"></span>Favourable (≥ 0%)</span>`+
+    `<span><span class="sw" style="background:var(--bad)"></span>Unfavourable (&lt; 0%)</span>`+
+    `<span><span class="ln"></span>0% reference</span>`+
+    `<span>▲ Mean</span>`;
+
+  const skew = mean>median+0.5 ? "right-skewed — a small number of unusually strong weeks pull the average above the typical week" :
+               median>mean+0.5 ? "left-skewed — a small number of unusually weak weeks pull the average below the typical week" :
+               "roughly symmetric — the average and typical week tell the same story";
+  const spreadNote = sd>15 ? "wide, meaning individual weeks swing well above or below budget even when the average looks fine" :
+                      sd>7 ? "moderate — most weeks land within a reasonably predictable band around budget" :
+                      "tight — weekly performance is quite consistent relative to budget";
+  $("#histInterpretation").innerHTML = `<p>The typical (median) week in the current selection lands at <b>${C.fmtPct(median,1)}</b> versus budget, with a mean of <b>${C.fmtPct(mean,1)}</b> — the distribution is ${skew}. Week-to-week spread (standard deviation) is <b>${C.fmtPct(sd,1)}</b>, which is ${spreadNote}.</p>
+    <p><b>${meet.p.toFixed(0)}%</b> of weeks (95% CI ${meet.lo.toFixed(0)}–${meet.hi.toFixed(0)}%) met or beat budget — matching the P(Meet Sales Budget) card above, since both read the same underlying weeks. ${meet.p>=50 ? "More weeks land on the favourable side of the 0% line than not, but the red bars below it still mark a real, recurring shortfall risk worth planning around." : "More weeks land on the unfavourable side of the 0% line than not — budget targets may be set aggressively relative to what the business is actually delivering."}</p>
+    <p class="small">Reading note: this is the raw distribution of a single ratio — it does not separate out which stores, categories or weeks drive the tails. Use the Segmentation (§4) and Variance (§3) tables to trace a specific bar back to the stores or categories behind it.</p>`;
 }
 
 /* ---------------------------------------------------------------------------------

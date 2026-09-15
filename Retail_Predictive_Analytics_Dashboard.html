@@ -268,7 +268,7 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
   </div>
   <div class="filterbar">
     <div class="filterbar-inner">
-      <div class="filter-field"><label for="fStore">Store</label><select id="fStore"></select></div>
+      <div class="filter-field"><label for="fStore">City</label><select id="fStore"></select></div>
       <div class="filter-field"><label for="fRegion">Region</label><select id="fRegion"></select></div>
       <div class="filter-field"><label for="fCategory">Category</label><select id="fCategory"></select></div>
       <div class="filter-field"><label for="fFormat">Format</label><select id="fFormat"></select></div>
@@ -305,7 +305,7 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
       <div class="control-row">
         <div class="control"><label>Metric<span></span></label><select id="descMetric"></select></div>
         <div class="control"><label>Break down by<span></span></label><select id="descDim">
-          <option value="Store_ID">Store</option><option value="Region">Region</option><option value="Category">Category</option><option value="Store_Format">Store format</option>
+          <option value="Store_ID">City</option><option value="Region">Region</option><option value="Category">Category</option><option value="Store_Format">Store format</option>
         </select></div>
       </div>
       <div class="two-col">
@@ -329,7 +329,7 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
       <div class="grid cols-4" id="varTotals"></div>
       <div class="control-row" style="margin-top:14px;">
         <div class="control"><label>Segment by</label><select id="varDim">
-          <option value="Store_ID">Store</option><option value="Region">Region</option><option value="Category">Category</option><option value="Store_Format">Store format</option>
+          <option value="Store_ID">City</option><option value="Region">Region</option><option value="Category">Category</option><option value="Store_Format">Store format</option>
         </select></div>
       </div>
       <div class="two-col">
@@ -347,7 +347,7 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
       <p class="tag-desc">Every split below is a transparent rule applied to the filtered data — the rule is stated above each table so the classification can be audited.</p>
       <div class="two-col">
         <div>
-          <h4 class="mt0">Store performance <span class="tip">?<span class="bubble">Stores are ranked by Sales Variance% (actual vs. budget) and split at the median: at/above median = High-performing, below = Low-performing.</span></span></h4>
+          <h4 class="mt0">City performance <span class="tip">?<span class="bubble">Cities are ranked by Sales Variance% (actual vs. budget) and split at the median: at/above median = High-performing, below = Low-performing.</span></span></h4>
           <div class="table-wrap"><table class="data" id="segStoreTable"></table></div>
         </div>
         <div>
@@ -358,7 +358,7 @@ hr.sep{border:none; border-top:1px solid var(--line); margin:16px 0;}
       <hr class="sep">
       <div class="two-col">
         <div>
-          <h4 class="mt0">Cost segments (by store) <span class="tip">?<span class="bubble">Expense ratio = Total Expense / Sales Revenue × 100. Above median = High-cost, at/below = Low-cost.</span></span></h4>
+          <h4 class="mt0">Cost segments (by city) <span class="tip">?<span class="bubble">Expense ratio = Total Expense / Sales Revenue × 100. Above median = High-cost, at/below = Low-cost.</span></span></h4>
           <div class="table-wrap"><table class="data" id="segCostTable"></table></div>
         </div>
         <div>
@@ -4941,6 +4941,10 @@ const METRICS = [
 const METRIC_LABEL = Object.fromEntries(METRICS.map(m=>[m[0],m[1]]));
 const METRIC_AGG = Object.fromEntries(METRICS.map(m=>[m[0],m[2]]));
 const isPctMetric = k => ["Discount_Rate","Conversion_Rate","Return_Rate","COGS_Rate","Inventory_Availability"].includes(k);
+// Column/axis label for a "break down by" / "segment by" dimension. Store_ID reads
+// as "City" everywhere it's shown to a user, since every table and chart under that
+// dimension displays each store's city name, never its internal code.
+const dimLabel = dim => dim==="Store_ID" ? "City" : dim.replace(/_/g," ");
 
 let STATE = {
   ALL: [], WEEK_KEYS: [], FILTERED: [],
@@ -4980,7 +4984,14 @@ function init(){
 function populateFilterOptions(){
   const opt=(v,l)=>`<option value="${v}">${l}</option>`;
   const uniq = k => Array.from(new Set(STATE.ALL.map(r=>r[k]))).sort();
-  $("#fStore").innerHTML = opt("All","All stores")+uniq("Store_ID").map(v=>opt(v,v+" · "+STATE.ALL.find(r=>r.Store_ID===v).City)).join("");
+  // Store filter is keyed internally by Store_ID (functional), but displays each
+  // store's city name only — no code is shown to the user — sorted alphabetically
+  // by that city name rather than by the underlying code.
+  const storeIdsByCity = uniq("Store_ID").slice().sort((a,b)=>{
+    const ca = STATE.ALL.find(r=>r.Store_ID===a).City, cb = STATE.ALL.find(r=>r.Store_ID===b).City;
+    return ca.localeCompare(cb);
+  });
+  $("#fStore").innerHTML = opt("All","All cities")+storeIdsByCity.map(v=>opt(v, STATE.ALL.find(r=>r.Store_ID===v).City)).join("");
   $("#fRegion").innerHTML = opt("All","All regions")+uniq("Region").map(v=>opt(v,v)).join("");
   $("#fCategory").innerHTML = opt("All","All categories")+uniq("Category").map(v=>opt(v,v)).join("");
   $("#fFormat").innerHTML = opt("All","All formats")+uniq("Store_Format").map(v=>opt(v,v)).join("");
@@ -5159,7 +5170,7 @@ function renderDescriptive(){
     dimRows.push({key, label, mean:Stat.mean(gv), std:Stat.std(gv), cv:Stat.cv(gv), n:grows.length});
   });
   dimRows.sort((a,b)=>b.mean-a.mean);
-  $("#descByDimTable").innerHTML = `<thead><tr><th>${dim.replace("_"," ")}</th><th>Mean</th><th>Std. dev.</th><th>CV %</th><th>n</th></tr></thead><tbody>${
+  $("#descByDimTable").innerHTML = `<thead><tr><th>${dimLabel(dim)}</th><th>Mean</th><th>Std. dev.</th><th>CV %</th><th>n</th></tr></thead><tbody>${
     dimRows.map(d=>`<tr><td>${d.label}</td><td>${C.fmtNum(d.mean,1)}${pct?'%':''}</td><td>${C.fmtNum(d.std,1)}</td><td>${d.cv.toFixed(1)}%</td><td>${d.n}</td></tr>`).join("")
   }</tbody>`;
 }
@@ -5178,11 +5189,14 @@ function renderVariance(){
     kpiCard("Expense Variance %", C.fmtPct(s.expVarPctTotal), `${s.favourableExpShare.toFixed(0)}% of weeks favourable`)
   ].join("");
 
-  const byGroup = A.varianceByGroup(rows, r=>r[dim]);
+  // Group by City (not the Store_ID code) whenever the Store dimension is selected —
+  // every store maps to exactly one city, so this is a straight relabel, not a
+  // different grouping.
+  const byGroup = A.varianceByGroup(rows, r=> dim==="Store_ID" ? r.City : r[dim]);
   $("#varChartSales").innerHTML = C.barChart({data: byGroup.map(g=>({label:g.key, value:g.salesVarPctTotal})), colorFn:d=>d.value>=0?"#0f8a5f":"#c22b3a", yTickFmt:v=>v.toFixed(0)+"%"});
   $("#varChartExp").innerHTML = C.barChart({data: byGroup.map(g=>({label:g.key, value:g.expVarPctTotal})), colorFn:d=>d.value<=0?"#0f8a5f":"#c22b3a", yTickFmt:v=>v.toFixed(0)+"%"});
 
-  $("#varTable").innerHTML = `<thead><tr><th>${dim.replace("_"," ")}</th><th>n</th><th>Sales Var $</th><th>Sales Var %</th><th>Sales</th><th>Expense Var $</th><th>Expense Var %</th><th>Expense</th></tr></thead><tbody>${
+  $("#varTable").innerHTML = `<thead><tr><th>${dimLabel(dim)}</th><th>n</th><th>Sales Var $</th><th>Sales Var %</th><th>Sales</th><th>Expense Var $</th><th>Expense Var %</th><th>Expense</th></tr></thead><tbody>${
     byGroup.map(g=>`<tr><td>${g.key}</td><td>${g.n}</td>
       <td class="${g.salesVarTotal>=0?'pos':'neg'}">${C.fmtCAD(g.salesVarTotal)}</td>
       <td><span class="chip ${g.salesVarPctTotal>=0?'good':'bad'}">${g.salesVarPctTotal>=0?'Favourable':'Unfavourable'}</span> ${g.salesVarPctTotal.toFixed(1)}%</td>
@@ -5199,8 +5213,8 @@ function renderVariance(){
 function renderSegmentation(){
   const rows = STATE.FILTERED;
   const st = A.segmentStores(rows);
-  $("#segStoreTable").innerHTML = `<thead><tr><th>Store</th><th>City</th><th>Sales Var %</th><th>Margin %</th><th>Segment</th></tr></thead><tbody>${
-    st.rows.map(r=>`<tr><td>${r.storeId}</td><td>${r.city}</td><td>${r.salesVarPct.toFixed(1)}%</td><td>${r.margin.toFixed(1)}%</td><td><span class="chip ${r.segment==='High-performing'?'good':'warn'}">${r.segment}</span></td></tr>`).join("")
+  $("#segStoreTable").innerHTML = `<thead><tr><th>City</th><th>Sales Var %</th><th>Margin %</th><th>Segment</th></tr></thead><tbody>${
+    st.rows.map(r=>`<tr><td>${r.city}</td><td>${r.salesVarPct.toFixed(1)}%</td><td>${r.margin.toFixed(1)}%</td><td><span class="chip ${r.segment==='High-performing'?'good':'warn'}">${r.segment}</span></td></tr>`).join("")
   }</tbody>`;
 
   const yearsPresent = new Set(rows.map(r=>r.Year));
@@ -5213,8 +5227,8 @@ function renderSegmentation(){
     }</tbody>`;
   }
 
-  const cost = A.segmentCost(rows, r=>r.Store_ID);
-  $("#segCostTable").innerHTML = `<thead><tr><th>Store</th><th>Expense Ratio %</th><th>Segment</th></tr></thead><tbody>${
+  const cost = A.segmentCost(rows, r=>r.City);
+  $("#segCostTable").innerHTML = `<thead><tr><th>City</th><th>Expense Ratio %</th><th>Segment</th></tr></thead><tbody>${
     cost.rows.map(r=>`<tr><td>${r.key}</td><td>${r.expRatio.toFixed(1)}%</td><td><span class="chip ${r.segment==='High-cost'?'warn':'good'}">${r.segment}</span></td></tr>`).join("")
   }</tbody>`;
 
@@ -5383,7 +5397,7 @@ function renderCorrelation(){
   // rendered <svg> to exist before we can attach the nearest-point listener).
   const cards = $("#corrPairs").children;
   mounts.forEach((m,i)=>{
-    m.chart.mount(cards[i], p => `${p.row.Store_ID} · ${p.row.City} · ${p.row.Category} · ${p.row.Week_Start}`);
+    m.chart.mount(cards[i], p => `${p.row.City} · ${p.row.Category} · ${p.row.Week_Start}`);
   });
 }
 
@@ -5682,13 +5696,13 @@ function renderStory(){
   }
   $("#storyBody").innerHTML = [
     step(1,"Past — What happened?", `<p>Across the current selection (${rows.length.toLocaleString()} store-week-category rows), actual sales totalled <span class="metric-pill">${C.fmtCAD(s.sActualSum)}</span> against a budget of <span class="metric-pill">${C.fmtCAD(s.sBudgetSum)}</span> — a variance of <span class="metric-pill">${s.salesVarPctTotal.toFixed(1)}%</span>. Expenses came in at <span class="metric-pill">${C.fmtCAD(s.eActualSum)}</span> versus a budget of <span class="metric-pill">${C.fmtCAD(s.eBudgetSum)}</span> (${s.expVarPctTotal.toFixed(1)}% variance), leaving operating profit of <span class="metric-pill">${C.fmtCAD(profit)}</span>.</p>`),
-    step(2,"Diagnostic — Why did it happen?", `<p>The strongest relationship in the current data is <b>${bestDriver.xl} ↔ ${bestDriver.yl}</b> (r = ${bestDriver.r.toFixed(2)}) — see §6 for the full correlation set. At the store level, <span class="metric-pill">${top.storeId}</span> is the strongest performer (Sales Variance ${top.salesVarPct.toFixed(1)}%) while <span class="metric-pill">${bottom.storeId}</span> lags most (${bottom.salesVarPct.toFixed(1)}%) — see §4 Segmentation for the full ranking and the cost/promotion splits.</p>`),
+    step(2,"Diagnostic — Why did it happen?", `<p>The strongest relationship in the current data is <b>${bestDriver.xl} ↔ ${bestDriver.yl}</b> (r = ${bestDriver.r.toFixed(2)}) — see §6 for the full correlation set. At the city level, <span class="metric-pill">${top.city}</span> is the strongest performer (Sales Variance ${top.salesVarPct.toFixed(1)}%) while <span class="metric-pill">${bottom.city}</span> lags most (${bottom.salesVarPct.toFixed(1)}%) — see §4 Segmentation for the full ranking and the cost/promotion splits.</p>`),
     step(3,"Predictive — What's likely next?", `<p>The §7/§8 regression + trend-seasonal models project <span class="metric-pill">${C.fmtCAD(fcSalesTotal)}</span> in sales over the next 12 weeks for the current selection, built from Model 1's operational drivers and the historical weekly seasonal pattern.</p>`),
     step(4,"Uncertainty — How confident are we?", `<p>The forecast's residual standard deviation is <span class="metric-pill">${C.fmtCAD(pi)}</span> per week, and historically <span class="metric-pill">${meet.p.toFixed(0)}%</span> of weeks (95% CI ${meet.lo.toFixed(0)}–${meet.hi.toFixed(0)}%) met or beat their sales budget. Model 1 validated at <span class="metric-pill">${(STATE.VALID1.metrics.r2*100).toFixed(1)}% R²</span> on unseen weeks (§9) — treat forecasts as a planning range, not a guarantee.</p>`),
     step(5,"Decision — What if management changes something?", `<p>Use §10 What-If to test specific decisions — e.g. raising marketing spend, adjusting discount depth, or trimming shipping cost — and see the resulting predicted sales, expense, operating profit and target-probabilities recompute instantly from Model 1 and Model 2's fitted coefficients.</p>`),
     step(6,"Recommendation — What should management consider?", `<ul>
       <li>Prioritize the drivers with the largest, most significant coefficients in Model 1 (§7) — typically Foot Traffic, Conversion Rate and Avg Transaction Value — since they move sales the most per unit of effort.</li>
-      <li>Investigate <span class="metric-pill">${bottom.storeId}</span> and any "High-cost" segment (§4) for controllable expense drivers (labour hours, shipping cost, return rate) before the next budget cycle.</li>
+      <li>Investigate <span class="metric-pill">${bottom.city}</span> and any "High-cost" segment (§4) for controllable expense drivers (labour hours, shipping cost, return rate) before the next budget cycle.</li>
       <li>Where a category is "Promotion-sensitive" (§4), discount depth is a lower-risk lever; where it isn't, prefer non-price levers (inventory availability, marketing) to protect margin.</li>
       <li>Re-run this dashboard's validation (§9) each quarter — if MAPE drifts materially higher, the underlying relationships have likely shifted and the models should be refit.</li>
     </ul>`)
